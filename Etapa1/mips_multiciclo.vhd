@@ -29,7 +29,8 @@ package p_MRstd is
     type inst_type is  
             ( ADDU, SUBU, AAND, OOR, XXOR, NNOR, SSLL, SLLV, SSRA, SRAV, SSRL, SRLV,
             ADDIU, ANDI, ORI, XORI, LUI, LBU, LW, SB, SW, SLT, SLTU, SLTI,
-            SLTIU, BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, invalid_instruction);
+            SLTIU, BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, MULTU, DIVU, MFHI, MFLO, NOP, 
+            invalid_instruction);
  
     type microinstruction is record
             CY1:   std_logic;       -- command of the first stage
@@ -42,6 +43,8 @@ package p_MRstd is
             rw:    std_logic;
             bw:    std_logic;       -- Byte-word control (mem write only)
             i:     inst_type;       -- operation specification
+            ini_mult: std_logic;
+            ini_div: std_logic;
     end record;
          
 end p_MRstd;
@@ -144,9 +147,9 @@ use IEEE.std_logic_arith.all;
 use work.p_MRstd.all;
 
 entity alu is
-       port( op1, op2 : in std_logic_vector(31 downto 0);
-             outalu :   out std_logic_vector(31 downto 0);   
-             op_alu : in inst_type   
+       port( op1, op2 : 	in std_logic_vector(31 downto 0);
+             outalu :   	out std_logic_vector(31 downto 0);   
+             op_alu :			in inst_type   
            );
 end alu;
 
@@ -179,6 +182,205 @@ begin
 end alu;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- multiplica
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+library IEEE;
+use IEEE.STD_LOGIC_1164.all;
+use IEEE.STD_LOGIC_UNSIGNED.all;
+
+entity multiplica is
+         port(
+             ck : 				in STD_LOGIC;
+             start : 			in STD_LOGIC;           
+             op1 : 				in STD_LOGIC_VECTOR(31 downto 0);         
+             op2 :	 			in STD_LOGIC_VECTOR(31 downto 0);       
+             end_mult : 	out STD_LOGIC;                       
+             P_Hi : 			out STD_LOGIC_VECTOR(31 downto 0);
+             A_Lo :				out STD_LOGIC_VECTOR(31 downto 0)       
+             );
+end multiplica;
+
+architecture arq_mult of multiplica is
+    
+    type type_states is (Inicio, Soma, Desloca);
+    signal PS, NS : type_states;
+
+    signal reg_Hi       : std_logic_vector(32 downto 0);
+    signal reg_Lo       : std_logic_vector(31 downto 0);
+    signal cont         : integer;
+begin
+
+    process (ck)
+    begin
+        if ck'event and ck='1' then
+            PS <= NS;
+        end if;
+    end process;
+
+    process (PS,start,cont)
+    begin
+        case PS is
+          when Inicio =>
+              if start='1' then 
+                  NS <= Soma; 
+              else 
+                  NS <= Inicio; 
+              end if;
+          when Soma =>
+                  NS <= Desloca;
+          when Desloca =>
+                  if (cont=32) then 
+                      NS <= Inicio;
+                  else 
+                      NS <= Soma;
+                  end if;
+        end case;               
+    end process;
+
+    process (ck,start)  
+    begin
+        if ck'event and ck='1' then
+            case PS is
+              when Inicio =>
+                    if start='1' then
+                        reg_Hi <= (others=>'0'); 		-- reg_HI possui o resultado da multiplicação
+                        reg_Lo <= op1; 							-- reg_LO possui o valor que esta sendo multiplicado
+                        cont <= 0; 									-- conta ate 32 quando chegar no trinta e dois acaba o somador 
+                    end if;
+                    end_mult <='0';
+
+              when Soma =>
+                    if reg_Lo(0) = '1' then
+                        reg_Hi <= reg_Hi + ('0' & op2);
+                    end if;
+                    cont <= cont+1;
+
+              when Desloca =>
+                    if cont=32 then 
+                        end_mult <='1';
+                    end if;
+                    reg_Hi <= '0' & reg_Hi (32 downto 1);					-- desloca para a direita uma casa
+                    reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1);   -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low 
+
+            end case;
+        end if;
+		end process;
+		
+		P_Hi <= reg_Hi(31 downto 0);
+		A_Lo <= reg_Lo;
+
+end arq_mult;
+
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- divisao --- nao ta funfando 
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+library IEEE;
+use IEEE.Std_Logic_1164.all;
+use IEEE.Std_Logic_unsigned.all;
+
+entity divide is                  
+      port( ck:        in  std_logic;
+            start:            in  std_logic; 
+            op1:              in  std_logic_vector(31 downto 0);
+            op2:              in  std_logic_vector(31 downto 0);
+            end_div:          out std_logic;
+            divisao, resto:   out std_logic_vector(31 downto 0));
+end divide;
+
+architecture arq_div of divide is   
+		type State_type is (Inicio, Desloca, subtrai, esc_quoc, restaura, fim);
+		signal PS, NS: State_type;
+
+		signal regP :      std_logic_vector(64 downto 0); -- tentar substituir por reg_Hi reg_Lo 
+		signal regB :      std_logic_vector(32   downto 0);
+		signal diferenca : std_logic_vector(32   downto 0);
+		signal cont:       integer;
+begin
+
+		diferenca <= regP(64 downto 32) - regB(32 downto 0); --- parte hi do regP - regB(divisor)
+
+   process(start, ck)
+   begin    
+     if start='1'then
+         regP(64 downto 32) <= (others=>'0');
+         regP(31 downto 0) <= op2;
+         regB  <= '0' & op1;
+         cont  <= 0;
+         endop <= '0';
+
+     elsif ck'event and ck='1' then 
+     
+            if PS=desloca then
+                regP  <= regP(63 downto 0) & regP(64);
+                
+            elsif PS=calc then  
+            
+                if diferenca(32)='1' then  
+                      regP(0)<='0';
+                else
+                      regP(0)<='1';
+                      regP(64 downto 32) <= diferenca;
+                end if;
+                
+                cont <= cont + 1;
+                
+            elsif PS=termina then
+                      resto   <= regP(63 downto 32);
+                      divisao <= regP(31 downto 0);     
+            end if;
+         
+        end if;       
+    end process;
+   
+    end_div  <= '1' when PS=fim else '0';
+   
+   -- maquina de estados para controlar a DIVISAO
+ 		process (ck)
+    begin
+    		if ck'event and ck='1' then  
+                PS <= NS;
+      	end if;
+   	end process;
+
+
+  	process (start, PS, cont)
+  	begin
+		   case PS is
+		      when inicio   =>  
+		      				if start='1' then  
+		      						NS <= desloca;  
+		      				else   
+		      						NS <= inicio;   
+		      				end if;
+		                       
+		      when desloca  =>  
+		      				NS <= subtrai;
+		      
+		      when subtrai  =>  
+		      				NS <= esc_quoc;
+		      
+		      when esc_quoc =>  
+		      				NS <= restaura; 
+		      
+		      when restaura =>  
+		      				if cont=size-1 then  
+		      						NS <= fim;  
+		      				else  
+		      						NS <= desloca; 
+		      				end if; 
+		          
+		      when fim =>   
+		      				NS <= inicio;
+		   
+		   end case; 
+   	end process;
+
+
+
+end arq_div;
+
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- Datapath structural description
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -196,15 +398,17 @@ entity datapath is
              d_address :   out std_logic_vector(31 downto 0);
              data :        inout std_logic_vector(31 downto 0);  
              uins :        in microinstruction;
+             end_mult, end_div	:		out std_logic;
              IR_OUT :      out std_logic_vector(31 downto 0)
           );
 end datapath;
 
 architecture datapath of datapath is
     signal incpc, pc, npc, IR,  result, R1, R2, RA, RB, RIN, ext16, cte_im, IMED, op1, op2, 
-           outalu, RALU, MDR, mdr_int, dtpc : std_logic_vector(31 downto 0) := (others=> '0');
+           outalu, RALU, MDR, mdr_int, dtpc, D_Lo, D_Hi, Hi, Lo, mult_Lo, mult_Hi, quociente, resto : std_logic_vector(31 downto 0) := (others=> '0'); -- P_Lo R_Hi
+    
     signal adD, adS : std_logic_vector(4 downto 0) := (others=> '0');    
-    signal inst_branch, inst_grupo1, inst_grupoI: std_logic;   
+    signal inst_branch, inst_grupo1, inst_grupoI, HiLo_en, end_mult_en, end_div_en: std_logic;   
     signal salta : std_logic := '0';
 begin
 
@@ -225,7 +429,7 @@ begin
   
    incpc <= pc + 4;
   
-   RNPC: entity work.regnbit port map(ck=>ck, rst=>rst, ce=>uins.CY1, D=>incpc,       Q=>npc);     
+   RNPC: entity work.regnbit port map(ck=>ck, rst=>rst, ce=>uins.CY1, D=>incpc, Q=>npc);     
            
    RIR: entity work.regnbit  port map(ck=>ck, rst=>rst, ce=>uins.CY1, D=>instruction, Q=>IR);
 
@@ -292,7 +496,26 @@ begin
                         (RA<=0  and uins.i=BLEZ) or (RA/=RB and uins.i=BNE) )  else
              '0';
                   
-             
+   -- mult/div
+
+   inst_mult: entity work.multiplica 
+   						port map (ck=>ck, start=>uins.ini_mult, op1=>RA, op2=>RB, end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
+
+
+	end_mult <=	end_mult_en;
+	end_div <= end_div_en;
+
+	 D_Hi <= mult_Hi when uins.i=MULTU else 
+   		  	 resto; 
+   D_Lo <= mult_Lo when uins.i=MULTU else 
+   		   quociente; 
+
+   HiLo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or (uins.i=MULTU and end_mult_en='1'))) else '0';
+
+   REG_HI: entity work.regnbit  
+   				port map(ck=>ck, rst=>rst, ce=>HiLo_en, D=>D_Hi, Q=>Hi);               
+   REG_LO: entity work.regnbit  
+   				port map(ck=>ck, rst=>rst, ce=>HiLo_en, D=>D_Lo, Q=>Lo);      
    --==============================================================================
    -- fourth stage
    --==============================================================================
@@ -308,9 +531,10 @@ begin
        
    RMDR: entity work.regnbit  port map(ck=>ck, rst=>rst, ce=>uins.wmdr, D=>mdr_int, Q=>MDR);                 
   
-   result <=    MDR when uins.i=LW  or uins.i=LBU else
-                RALU;
-
+ 	 result <=   Hi when uins.i=MFHI else
+               Lo when uins.i=MFLO else
+               MDR when uins.i=LW  or uins.i=LBU else
+               RALU;
    --==============================================================================
    -- fifth stage
    --==============================================================================
@@ -325,7 +549,7 @@ begin
 						     or uins.i=SSLL or uins.i=SLLV
 						     or uins.i=SSRA or uins.i=SRAV
 						     or uins.i=SSRL or uins.i=SRLV
-                                                     else
+						     or uins.i=MFHI or uins.i=MFLO else --- endereso salvar no banco de dados
          IR(20 downto 16) -- inst_grupoI='1' or uins.i=SLTIU or uins.i=SLTI 
         ;                 -- or uins.i=LW or  uins.i=LBU  or uins.i=LUI, or default
     
@@ -352,6 +576,7 @@ use work.p_MRstd.all;
 entity control_unit is
         port(   ck, rst : in std_logic;          
                 uins : out microinstruction;
+                end_mult, end_div : in std_logic;
                 ir : in std_logic_vector(31 downto 0)
              );
 end control_unit;
@@ -366,7 +591,8 @@ begin
     -- BLOCK (1/3) - INSTRUCTION DECODING and ALU operation definition.
     -- This block generates 1 Output Function of the Control Unit
     ----------------------------------------------------------------------------------------
-    i <=   ADDU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100001" else
+    i <=   NOP		when ir(31 downto 0) =x"00000000" else
+    			 ADDU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100001" else
            SUBU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100011" else
            AAND   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100100" else
            OOR    when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100101" else
@@ -398,8 +624,12 @@ begin
            J      when ir(31 downto 26)="000010" else
            JAL    when ir(31 downto 26)="000011" else
            JALR   when ir(31 downto 26)="000000"  and ir(20 downto 16)="00000"
-                                           and ir(10 downto 0) = "00000001001" else
+                                           				and ir(10 downto 0) = "00000001001" else
            JR     when ir(31 downto 26)="000000" and ir(20 downto 0)="000000000000000001000" else
+           MULTU  when ir(31 downto 26)="000000" and ir(15 downto 0)=x"0019" else
+           DIVU   when ir(31 downto 26)="000000" and ir(15 downto 0)=x"001B" else
+           MFHI   when ir(31 downto 16)=x"0000" and ir(10 downto 0)="00000010000" else
+           MFLO   when ir(31 downto 16)=x"0000" and ir(10 downto 0)="00000010010" else
            invalid_instruction ; -- IMPORTANT: default condition is invalid instruction;
         
     assert i /= invalid_instruction
@@ -427,8 +657,13 @@ begin
     
     uins.bw    <= '0' when PS=Sst and i=SB   else '1';
       
-    uins.wpc   <= '1' when PS=Swbk or PS=Sst or PS=Ssalta  else  '0';
+    uins.wpc   <= '1' when PS=Swbk or PS=Sst or PS=Ssalta  
+    																				 or (PS=Salu and ((i=DIVU and end_div='1') or (i=MULTU and end_mult='1'))) else
+   			  				'0';
+
+   	uins.ini_mult  <= '1' when PS=Sreg and i=MULTU else '0';
   
+    uins.ini_div  <= '1' when PS=Sreg and i=DIVU else '0';
     ---------------------------------------------------------------------------------------------
     -- BLOCK (3/3) - Sequential part of the control unit - two processes implementing the
     -- Control Unit state register and the next-state (combinational) function
@@ -449,7 +684,7 @@ begin
     end process;
      
      
-    process(PS, i)
+    process(PS, i, end_mult, end_div)
     begin
        case PS is         
       
@@ -471,7 +706,11 @@ begin
                                 NS <= Sst;
                           elsif i=J or i=JAL or i=JALR or i=JR or i=BEQ
                                     or i=BGEZ or i=BLEZ  or i=BNE then 
-                                NS <= Ssalta;  
+                                NS <= Ssalta;
+                          elsif ((i=MULTU and end_mult='0') or (i=DIVU and end_div='0')) then
+                                NS <= Salu;
+                          elsif ((i=DIVU and end_div='1') or (i=MULTU and end_mult='1')) then  
+                                NS <= Sfetch;  
                           else 
                                 NS <= Swbk; 
                           end if;
@@ -508,13 +747,15 @@ end MRstd;
 architecture MRstd of MRstd is
       signal IR: std_logic_vector(31 downto 0);
       signal uins: microinstruction;
+      signal end_mult, end_div : std_logic;
  begin
 
      dp: entity work.datapath   
          port map( ck=>clock, rst=>reset, IR_OUT=>IR, uins=>uins, i_address=>i_address, 
-                   instruction=>instruction, d_address=>d_address,  data=>data);
+                   instruction=>instruction, d_address=>d_address,  data=>data,
+                   end_mult=>end_mult, end_div=>end_div);
 
-     ct: entity work.control_unit port map( ck=>clock, rst=>reset, IR=>IR, uins=>uins);
+     ct: entity work.control_unit port map( ck=>clock, rst=>reset, IR=>IR, end_mult => end_mult, end_div => end_div, uins=>uins);
          
      ce <= uins.ce;
      rw <= uins.rw; 
