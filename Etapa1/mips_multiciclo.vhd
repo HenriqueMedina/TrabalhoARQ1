@@ -183,91 +183,126 @@ end alu;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- multiplica
+--	breve explição...
+--	op1 vai mutiplicar op2 como?
+--	primeiro se espera uma sinal de start ser gerado pela unit.controle,
+--	quando ocorrido o hardware da multiplicaçao coloca '0's no reg_Hi e 
+--	o valor de op1 reg_Lo, ficando com VVVVVV:(obs: fiz o exemplo com 9 downto 0 para nao ficar muito grando)
+--		reg_Hi = 00000000000 (reg hi tem um bit a mais) 
+--		reg_Lo = 0000000101 <<<< valor de op1
+--	Depois disso é hora de fazer a multiplicaçao (soma sucessivas, olhar PS = Soma)
+--	para isso se verifica se o bit 0 do reg_Lo é '1' se sim entao se soma o op2 em reg_Hi
+--		op2 = 0000010101
+--		reg_Hi = 00000000000 + '0' & 0000010101; 
+--		reg_Hi = 00000010101
+--	Depois passa para a etapa de deloca em que se move um bit para direita do reg_Hi para o reg_Lo
+--		reg_Hi = 0 & 0000001010--1 <<< esse bit vai para o reg_Lo
+--		reg_Lo = 1 & 000000010---1 <<< esse bit nao exite mais
+--	obtemos entao:
+--		reg_Hi = 00000001010
+--		reg_Lo = 1000000010
+--	apartir daqui fica em loop o soma e o desloca 32 vezes
+--		reg_Lo = 1000000010 = bit 0 = '0' nao acontece a soma 
+--		reg_Hi = 00000001010
+--	
+--	desloca:
+--		reg_Hi = 0 & 0000000101--0 <<< esse bit vai para o reg_Lo
+--		reg_Lo = 0 & 100000001---0 <<< esse bit nao exite mais
+--	obtemos entao:
+--		reg_Hi = 00000000101
+--		reg_Lo = 0100000001
+--	soma:
+--		reg_Lo = 0100000001 = bit 0 = '1' acontece a soma
+--		reg_Hi = 00000000101 + '0' & 0000010101;
+--		reg_Hi = 00000011010
+--	agora desloca-se 32 vezes ate ter: 
+--		reg_Lo = 00001101001 <<<< resultado final 
+--
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.STD_LOGIC_1164.all;
 use IEEE.STD_LOGIC_UNSIGNED.all;
 
 entity multiplica is
-         port(
-             ck : 				in STD_LOGIC;
-             start : 			in STD_LOGIC;           
-             op1 : 				in STD_LOGIC_VECTOR(31 downto 0);         
-             op2 :	 			in STD_LOGIC_VECTOR(31 downto 0);       
-             end_mult : 	out STD_LOGIC;                       
-             P_Hi : 			out STD_LOGIC_VECTOR(31 downto 0);
-             A_Lo :				out STD_LOGIC_VECTOR(31 downto 0)       
-             );
+	port (
+		ck        : in STD_LOGIC;
+		start     : in STD_LOGIC; 
+		op1       : in STD_LOGIC_VECTOR(31 downto 0); 
+		op2       : in STD_LOGIC_VECTOR(31 downto 0); 
+		end_mult  : out STD_LOGIC; 
+		P_Hi      : out STD_LOGIC_VECTOR(31 downto 0);
+		A_Lo      : out STD_LOGIC_VECTOR(31 downto 0) 
+	);
 end multiplica;
 
 architecture arq_mult of multiplica is
-    
-    type type_states is (Inicio, Soma, Desloca);
-    signal PS, NS : type_states;
+ 
+	type type_states is (Inicio, Soma, Desloca);
+	signal PS, NS : type_states;
 
-    signal reg_Hi       : std_logic_vector(32 downto 0);
-    signal reg_Lo       : std_logic_vector(31 downto 0);
-    signal cont         : integer;
+	signal reg_Hi : std_logic_vector(32 downto 0);
+	signal reg_Lo : std_logic_vector(31 downto 0);
+	signal cont : integer;
 begin
+	
+	process (ck)
+	begin
+		if ck'EVENT and ck = '1' then
+			PS <= NS;
+		end if;
+	end process;
 
-    process (ck)
-    begin
-        if ck'event and ck='1' then
-            PS <= NS;
-        end if;
-    end process;
+	process (PS, start, cont)
+	begin
+		case PS is
+			when Inicio => 
+				if start = '1' then
+					NS <= Soma;
+				else
+					NS <= Inicio;
+				end if;
+			when Soma => 
+				NS <= Desloca;
+			when Desloca => 
+				if (cont = 32) then
+					NS <= Inicio;
+				else
+					NS <= Soma;
+				end if;
+		end case; 
+	end process;
 
-    process (PS,start,cont)
-    begin
-        case PS is
-          when Inicio =>
-              if start='1' then 
-                  NS <= Soma; 
-              else 
-                  NS <= Inicio; 
-              end if;
-          when Soma =>
-                  NS <= Desloca;
-          when Desloca =>
-                  if (cont=32) then 
-                      NS <= Inicio;
-                  else 
-                      NS <= Soma;
-                  end if;
-        end case;               
-    end process;
+	process (ck, start) 
+	begin
+		if ck'EVENT and ck = '1' then
+			case PS is
+				when Inicio => 
+					if start = '1' then
+						reg_Hi <= (others => '0'); 	-- reg_HI possui o resultado da multiplicação
+						reg_Lo <= op1; 				-- reg_LO possui o valor que esta sendo multiplicado
+						cont <= 0; 					-- conta ate 32 quando chegar no trinta e dois acaba o somador
+					end if;
+					end_mult <= '0';
 
-    process (ck,start)  
-    begin
-        if ck'event and ck='1' then
-            case PS is
-              when Inicio =>
-                    if start='1' then
-                        reg_Hi <= (others=>'0'); 		-- reg_HI possui o resultado da multiplicação
-                        reg_Lo <= op1; 							-- reg_LO possui o valor que esta sendo multiplicado
-                        cont <= 0; 									-- conta ate 32 quando chegar no trinta e dois acaba o somador 
-                    end if;
-                    end_mult <='0';
+				when Soma => 
+					if reg_Lo(0) = '1' then
+						reg_Hi <= reg_Hi + ('0' & op2);
+					end if;
+					cont <= cont + 1;
 
-              when Soma =>
-                    if reg_Lo(0) = '1' then
-                        reg_Hi <= reg_Hi + ('0' & op2);
-                    end if;
-                    cont <= cont+1;
+				when Desloca => 
+					if cont = 32 then
+						end_mult <= '1';
+					end if;
+					reg_Hi <= '0' & reg_Hi (32 downto 1); -- desloca para a direita uma casa
+					reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
 
-              when Desloca =>
-                    if cont=32 then 
-                        end_mult <='1';
-                    end if;
-                    reg_Hi <= '0' & reg_Hi (32 downto 1);					-- desloca para a direita uma casa
-                    reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1);   -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low 
-
-            end case;
-        end if;
-		end process;
-		
-		P_Hi <= reg_Hi(31 downto 0);
-		A_Lo <= reg_Lo;
+			end case;
+		end if;
+	end process;
+	 
+	P_Hi <= reg_Hi(31 downto 0);
+	A_Lo <= reg_Lo;
 
 end arq_mult;
 
@@ -649,7 +684,7 @@ begin
                 
     uins.wmdr  <= '1' when PS=Sld            else '0';
   
-    uins.wreg   <= '1' when PS=Swbk or (PS=Ssalta and (i=JAL or i=JALR)) else   '0';
+    uins.wreg   <= '1' when (PS=Swbk or (PS=Ssalta and (i=JAL or i=JALR))) and i /= NOP else  '0'; -- nop nao escreve nos banco de registrador (tem que testar)
    
     uins.rw    <= '0' when PS=Sst            else  '1';
                   
