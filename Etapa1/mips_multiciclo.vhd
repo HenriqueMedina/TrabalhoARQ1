@@ -307,7 +307,7 @@ begin
 end arq_mult;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
--- divisao --- nao ta funfando 
+-- divisao 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 library IEEE;
@@ -315,46 +315,43 @@ use IEEE.Std_Logic_1164.all;
 use IEEE.Std_Logic_unsigned.all;
 
 entity divide is                  
-      port( ck 				:	in  std_logic;
-            start 			:   in  std_logic; 
-            op1				:   in  std_logic_vector(31 downto 0);
-            op2				:	in  std_logic_vector(31 downto 0);
-            end_div 		:	out std_logic;
-            divisao, resto 	:	out std_logic_vector(31 downto 0));
+      port( ck 				      : 	in  std_logic;
+            start 		      :   in  std_logic; 
+            op1				      :   in  std_logic_vector(31 downto 0);
+            op2				      :  	in  std_logic_vector(31 downto 0);
+            end_div 		    : 	out std_logic;
+            divisao, resto  : 	out std_logic_vector(31 downto 0)
+          );
 end divide;
 
 architecture arq_div of divide is   
-		type State_type is (Inicio, Desloca, subtrai, esc_quoc, restaura, fim);
+		type State_type is (inicio, desloca, subtrai, termina);
 		signal PS, NS: State_type;
 
 		signal reg_Hi 		:	std_logic_vector(32 downto 0);
 		signal reg_Lo 		:	std_logic_vector(31 downto 0);
---		signal regP 		:	std_logic_vector(64 downto 0); -- tentar substituir por reg_Hi reg_Lo 
---		signal regB 		:	std_logic_vector(32   downto 0);
-		signal diferenca 	:	std_logic_vector(32   downto 0);
+		signal diferenca 	:	std_logic_vector(32 downto 0);
 		signal cont 		:	integer;
 begin
 
-
+    diferenca <= reg_Hi - ('0' & op2);
    process(start, ck)
    begin    
      if start='1'then
          reg_Hi 	<= (others=>'0');
-         reg_Lo 	<= op2;
-        -- regB  		<= '0' & op1;
+         reg_Lo 	<= op1;
          cont  		<= 0;
-         endop 		<= '0';
+
 
      elsif ck'event and ck='1' then 
      
             if PS=desloca then
-               -- regP  <= regP(63 downto 0) & regP(64);
                 reg_Hi <= reg_Hi (31 downto 0) & reg_Lo (31);
-				reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32);
+				        reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32);
 
             elsif PS=subtrai then  
             	
-            	diferenca <= reg_Hi - ('0' & op1); --- parte hi do regP - regB(divisor)
+             
 
                 if diferenca(32)='1' then  
                       reg_Lo(0)<='0';
@@ -366,7 +363,7 @@ begin
                 cont <= cont + 1;
                 
             elsif PS=termina then
-                      resto   <= reg_Hi;
+                      resto   <= reg_Hi(31 downto 0);
                       divisao <= reg_Lo;     
             end if;
         end if;       
@@ -401,7 +398,7 @@ begin
                             	NS <= desloca;  
                             end if;
 		      when termina 	=>   
-		      				NS <= fim;
+		      				NS <= inicio;
 		   end case; 
    	end process;
 
@@ -545,9 +542,9 @@ begin
    Hi_Lo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or (uins.i=MULTU and end_mult_en='1'))) else '0';
 
    REG_HI: entity work.regnbit  
-   				port map(ck=>ck, rst=>rst, ce=>HiLo_en, D=>D_Hi, Q=>Hi);               
+   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);               
    REG_LO: entity work.regnbit  
-   				port map(ck=>ck, rst=>rst, ce=>HiLo_en, D=>D_Lo, Q=>Lo);      
+   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);      
    --==============================================================================
    -- fourth stage
    --==============================================================================
