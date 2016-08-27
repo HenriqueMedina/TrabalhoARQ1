@@ -261,9 +261,11 @@ begin
 				else
 					NS <= Inicio;
 				end if;
+
 			when Soma => 
 				NS <= Desloca;
-			when Desloca => 
+			
+      when Desloca => 
 				if (cont = 32) then
 					NS <= Inicio;
 				else
@@ -334,14 +336,12 @@ architecture arq_div of divide is
 		signal cont 		:	integer;
 begin
 
-    diferenca <= reg_Hi - ('0' & op2);
    process(start, ck)
    begin    
-     if start='1'then
+     if PS= inicio and start='1' then
          reg_Hi 	<= (others=>'0');
          reg_Lo 	<= op1;
          cont  		<= 0;
-
 
      elsif ck'event and ck='1' then 
      
@@ -350,9 +350,6 @@ begin
 				        reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32);
 
             elsif PS=subtrai then  
-            	
-             
-
                 if diferenca(32)='1' then  
                       reg_Lo(0)<='0';
                 else
@@ -360,18 +357,16 @@ begin
                       reg_Hi <= diferenca;
                 end if;
                 
-                cont <= cont + 1;
-                
-            elsif PS=termina then
-                      resto   <= reg_Hi(31 downto 0);
-                      divisao <= reg_Lo;     
+                cont <= cont + 1;                      
             end if;
         end if;       
     end process;
-   
+    
+    diferenca <= reg_Hi - ('0' & op2);    
+    resto   <= reg_Hi(31 downto 0);
+    divisao <= reg_Lo;     
     end_div  <= '1' when PS=termina else '0';
    
-   -- maquina de estados para controlar a DIVISAO
  		process (ck)
     begin
     		if ck'event and ck='1' then  
@@ -384,21 +379,24 @@ begin
   	begin
 		   case PS is
 		      when inicio   =>  
-		      				if start='1' then  
-		      						NS <= desloca;  
-		      				else   
-		      						NS <= inicio;   
-		      				end if;
-		      when desloca  =>  
-		      				NS <= subtrai;
-		      when subtrai  =>  
-		      				if cont=32 then 
-                            	NS <= termina; 
-                            else 
-                            	NS <= desloca;  
-                            end if;
-		      when termina 	=>   
-		      				NS <= inicio;
+    				if start='1' then  
+    						NS <= desloca;  
+    				else   
+    						NS <= inicio;   
+    				end if;
+		     
+          when desloca  =>  
+		      			NS <= subtrai;
+		     
+          when subtrai  =>  
+		      	 if cont=31 then 
+                NS <= termina; 
+             else 
+                NS <= desloca;  
+            end if;
+		     
+          when termina 	=>   
+	      				NS <= inicio;
 		   end case; 
    	end process;
 
@@ -536,15 +534,15 @@ begin
 
 	D_Hi <= mult_Hi when uins.i=MULTU else 
    		  	 resto; 
-   	D_Lo <= mult_Lo when uins.i=MULTU else 
+  D_Lo <= mult_Lo when uins.i=MULTU else 
    		   quociente; 
 
-   Hi_Lo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or (uins.i=MULTU and end_mult_en='1'))) else '0';
+  Hi_Lo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or (uins.i=MULTU and end_mult_en='1'))) else '0';
 
-   REG_HI: entity work.regnbit  
-   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);               
-   REG_LO: entity work.regnbit  
-   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);      
+  REG_HI: entity work.regnbit  
+  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);               
+  REG_LO: entity work.regnbit  
+  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);      
    --==============================================================================
    -- fourth stage
    --==============================================================================
