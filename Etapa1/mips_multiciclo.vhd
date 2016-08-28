@@ -39,7 +39,7 @@ package p_MRstd is
             wmdr:       std_logic;       --    "    of the fourth stage
             wpc:        std_logic;       -- PC write enable
             wreg:       std_logic;       -- register bank write enable
-            ce          std_logic;       -- Chip enable and R_W controls
+            ce:         std_logic;       -- Chip enable and R_W controls
             rw:         std_logic;
             bw:         std_logic;       -- Byte-word control (mem write only)
             i:          inst_type;       -- operation specification
