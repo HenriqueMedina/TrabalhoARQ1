@@ -1,19 +1,19 @@
 -------------------------------------------------------------------------
 --
--- I M P L E M E N T A Ç Ã O   P A R C I A L  D O  M I P S   (nov/2010)
+-- I M P L E M E N T A ï¿½ ï¿½ O   P A R C I A L  D O  M I P S   (nov/2010)
 --
---  ImPoRtAnTe :   VERSÃO  SEM MULTIPLICAÇÃO/DIVISÃO
+--  ImPoRtAnTe :   VERSï¿½O  SEM MULTIPLICAï¿½ï¿½O/DIVISï¿½O
 --
 --  Professores     Fernando Moraes / Ney Calazans
 --
 --  ==> The top-level processor entity is MRstd
 --  21/06/2010 - Bug corrigido no mux que gera op1 - agora recebe npc e
---		não pc.
+--		nï¿½o pc.
 --  17/11/2010 (Ney) - Bugs corrigidos:
---	1 - Decodificação das instruções BGEZ e BLEZ estava incompleta
+--	1 - Decodificaï¿½ï¿½o das instruï¿½ï¿½es BGEZ e BLEZ estava incompleta
 --		Modificadas linhas 395 e 396 abaixo
---	2 - Definição de que linhas escolhem o registrador a ser escrito
---	nas instruções de deslocamento (SSLL, SLLV, SSRA, SRAV, SSRL e SRLV)
+--	2 - Definiï¿½ï¿½o de que linhas escolhem o registrador a ser escrito
+--	nas instruï¿½ï¿½es de deslocamento (SSLL, SLLV, SSRA, SRAV, SSRL e SRLV)
 --		Acrescentadas linhas 325 a 327 abaixo
 -------------------------------------------------------------------------
 
@@ -29,7 +29,7 @@ package p_MRstd is
    type inst_type is  
          ( ADDU, SUBU, AAND, OOR, XXOR, NNOR, SSLL, SLLV, SSRA, SRAV, SSRL, SRLV,
            ADDIU, ANDI, ORI, XORI, LUI, LBU, LW, SB, SW, SLT, SLTU, SLTI, SLTIU,
-           BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, MULTU, DIVU, MFHI, MFLO, NOP, 
+           BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, MULTU, DIVU, MFHI, MFLO, NOP, --incremento das 5 novas instrucoes
            invalid_instruction);
 
    type microinstruction is record
@@ -182,34 +182,39 @@ begin
 end alu;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
--- multiplica
+-- hardware para executar a multiplicacao por etapas
 --	op1 vai mutiplicar op2 como?
 --	atraves de soma sucessivas 
---	Exemplo
--- op1 = 00110
--- op2 = 00101
+--	numero de somas/execucoes = numero de bits entre os operandos
+-- antes de tudo, se coloca o valor de op1 no Low
+-- depois disso, comecam as n execucoes, sendo que cada execucao consiste em:
+-- primeiro, se o ultimo bit do Low = '1', entao se soma op2 em High, 
+-- caso contrario, nada se altera
+-- segundo, desloca para a direita o high e o low "concatenados"
+-- 
+-- Exemplo
+-- op1 = 00110 (6)
+-- op2 = 00101 (5)
 --
 --      reg_Hi reg_Lo
---       00000 00110
+--       00000 00110  -> move-se o valor de op1 para o low
 --
---       00000 00110
---1      00000 00110  reg_Lo = 0 nada altera 
+-- 1     00000 00110  reg_Lo = 0 nada altera 
+--       00000 00011  >> Desloca para direita
 -- 
---       00000 00011 << Desloca para direita
---2      00101 00011  reg_Lo = 1 entao op2 é somado ao reg_Hi 
+-- 2     00101 00011  reg_Lo = 1 entao op2 eh somado ao reg_Hi 
+--       00010 10001  >> desloca
 --
---       00010 10001 
---3      00111 10001  reg_Lo = 1 entao op2 é somado ao reg_Hi
+-- 3     00111 10001  reg_Lo = 1 entao op2 eh somado ao reg_Hi
+--       00011 11000  >> desloca
 --                  
---       00011 11000 
---4      00011 11000 reg_Lo = 0 nada altera
+-- 4     00011 11000 reg_Lo = 0 nada altera
+--       00001 11100 >> desloca
 --
---       00001 11100
---5      00001 11100 reg_Lo = 0 nada altera
+-- 5     00001 11100 reg_Lo = 0 nada altera
+--       00000 11110 >> ultimo desloque antes de terminar 
 --
---5      00000 11110 << ultimo desloque antes de terminar 
---
--- termina a multiplicaçao e obtemos o resultado 30 no reg_Lo
+-- termina a multiplicacao e obtemos o resultado 30
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.STD_LOGIC_1164.all;
@@ -244,12 +249,12 @@ begin
 		end if;
 	end process;
 
-   -- maquina de estados da multiplicação
+   -- maquina de estados da multiplicacao
 	process (PS, start, cont)
 	begin
 		case PS is
 			when Inicio => 
-				if start = '1' then -- quando sinal de start é ativo a maquina passa para o estado de soma
+				if start = '1' then -- quando sinal de start eh ativo a maquina passa para o estado de soma
 					NS <= Soma;
 				else
 					NS <= Inicio;
@@ -287,7 +292,7 @@ begin
 					cont <= cont + 1;              -- incrementa o cont
 
 				when Desloca => 
-					if cont = 32 then              -- quando cont for igual a 32 a multiplicaçao deve acabar
+					if cont = 32 then              -- quando cont for igual a 32 a multiplicacao deve acabar
 						end_mult <= '1';
 					end if;
 					reg_Hi <= '0' & reg_Hi (32 downto 1);            -- desloca para a direita uma casa
@@ -298,14 +303,14 @@ begin
 	end process;
 	 
 	P_Hi <= reg_Hi(31 downto 0);					-- a parte do Reg_Hi vai para saida P_Hi
-	A_Lo <= reg_Lo;									-- a parte do Reg_Lo contem o resultado da multiplicação e vai para a saida A_Lo
+	A_Lo <= reg_Lo;									-- a parte do Reg_Lo contem o resultado da multiplicacao e vai para a saida A_Lo
 
 end arq_mult;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- divisao 
 -- op2 vai dividir op1 como?
--- atraves de subtraçao sucessivas 
+-- atraves de subtracao sucessivas 
 -- Exemplo
 -- op1 = 11011
 -- op2 = 00101
@@ -395,7 +400,7 @@ begin
       	end if;
    	end process;
 
-    -- maquina de estados da divisão
+    -- maquina de estados da divisao
   	process (start, PS, cont)
   	begin
 		   case PS is
@@ -583,7 +588,7 @@ begin
        
    RMDR: entity work.regnbit  port map(ck=>ck, rst=>rst, ce=>uins.wmdr, D=>mdr_int, Q=>MDR);                 
   
- 	result <=   Hi when uins.i=MFHI else                -- para executar a instruçao MFHi e MFLo foi acresentado
+ 	result <=   Hi when uins.i=MFHI else                -- para executar a instrucao MFHi e MFLo foram acresentadas
                Lo when uins.i=MFLO else                -- essas linhas para mover os valores de Hi para result que depois vai ser salvo no REG_bank
                MDR when uins.i=LW  or uins.i=LBU else
                RALU;
