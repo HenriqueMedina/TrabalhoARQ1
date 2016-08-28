@@ -26,26 +26,26 @@ use IEEE.Std_Logic_1164.all;
 package p_MRstd is  
     
     -- inst_type defines the instructions decodeable by the control unit
-    type inst_type is  
-            ( ADDU, SUBU, AAND, OOR, XXOR, NNOR, SSLL, SLLV, SSRA, SRAV, SSRL, SRLV,
-            ADDIU, ANDI, ORI, XORI, LUI, LBU, LW, SB, SW, SLT, SLTU, SLTI,
-            SLTIU, BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, MULTU, DIVU, MFHI, MFLO, NOP, 
-            invalid_instruction);
- 
-    type microinstruction is record
-            CY1:   std_logic;       -- command of the first stage
-            CY2:   std_logic;       --    "    of the second stage
-            walu:  std_logic;       --    "    of the third stage
-            wmdr:  std_logic;       --    "    of the fourth stage
-            wpc:   std_logic;       -- PC write enable
-            wreg:  std_logic;       -- register bank write enable
-            ce:    std_logic;       -- Chip enable and R_W controls
-            rw:    std_logic;
-            bw:    std_logic;       -- Byte-word control (mem write only)
-            i:     inst_type;       -- operation specification
-            ini_mult: std_logic;
-            ini_div: std_logic;
-    end record;
+   type inst_type is  
+         ( ADDU, SUBU, AAND, OOR, XXOR, NNOR, SSLL, SLLV, SSRA, SRAV, SSRL, SRLV,
+           ADDIU, ANDI, ORI, XORI, LUI, LBU, LW, SB, SW, SLT, SLTU, SLTI, SLTIU,
+           BEQ, BGEZ, BLEZ, BNE, J, JAL, JALR, JR, MULTU, DIVU, MFHI, MFLO, NOP, 
+           invalid_instruction);
+
+   type microinstruction is record
+            CY1:        std_logic;       -- command of the first stage
+            CY2:        std_logic;       --    "    of the second stage
+            walu:       std_logic;       --    "    of the third stage
+            wmdr:       std_logic;       --    "    of the fourth stage
+            wpc:        std_logic;       -- PC write enable
+            wreg:       std_logic;       -- register bank write enable
+            ce          std_logic;       -- Chip enable and R_W controls
+            rw:         std_logic;
+            bw:         std_logic;       -- Byte-word control (mem write only)
+            i:          inst_type;       -- operation specification
+            ini_mult:   std_logic;      -- sinal de controle para incio mult
+            ini_div:    std_logic;      --sinal de controle para incio divi
+   end record;
          
 end p_MRstd;
 
@@ -183,41 +183,33 @@ end alu;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- multiplica
---	breve explição...
 --	op1 vai mutiplicar op2 como?
---	primeiro se espera uma sinal de start ser gerado pela unit.controle,
---	quando ocorrido o hardware da multiplicaçao coloca '0's no reg_Hi e 
---	o valor de op1 reg_Lo, ficando com VVVVVV:(obs: fiz o exemplo com 9 downto 0 para nao ficar muito grando)
---		reg_Hi = 00000000000 (reg hi tem um bit a mais) 
---		reg_Lo = 0000000101 <<<< valor de op1
---	Depois disso é hora de fazer a multiplicaçao (soma sucessivas, olhar PS = Soma)
---	para isso se verifica se o bit 0 do reg_Lo é '1' se sim entao se soma o op2 em reg_Hi
---		op2 = 0000010101
---		reg_Hi = 00000000000 + '0' & 0000010101; 
---		reg_Hi = 00000010101
---	Depois passa para a etapa de deloca em que se move um bit para direita do reg_Hi para o reg_Lo
---		reg_Hi = 0 & 0000001010--1 <<< esse bit vai para o reg_Lo
---		reg_Lo = 1 & 000000010---1 <<< esse bit nao exite mais
---	obtemos entao:
---		reg_Hi = 00000001010
---		reg_Lo = 1000000010
---	apartir daqui fica em loop o soma e o desloca 32 vezes
---		reg_Lo = 1000000010 = bit 0 = '0' nao acontece a soma 
---		reg_Hi = 00000001010
---	
---	desloca:
---		reg_Hi = 0 & 0000000101--0 <<< esse bit vai para o reg_Lo
---		reg_Lo = 0 & 100000001---0 <<< esse bit nao exite mais
---	obtemos entao:
---		reg_Hi = 00000000101
---		reg_Lo = 0100000001
---	soma:
---		reg_Lo = 0100000001 = bit 0 = '1' acontece a soma
---		reg_Hi = 00000000101 + '0' & 0000010101;
---		reg_Hi = 00000011010
---	agora desloca-se 32 vezes ate ter: 
---		reg_Lo = 00001101001 <<<< resultado final 
+--	atraves de soma sucessivas 
+--	Exemplo
+-- op1 = 00110
+-- op2 = 00101
 --
+--      reg_Hi reg_Lo
+--       00000 00110
+--
+--       00000 00110
+--1      00000 00110  reg_Lo = 0 nada altera 
+-- 
+--       00000 00011 << Desloca para direita
+--2      00101 00011  reg_Lo = 1 entao op2 é somado ao reg_Hi 
+--
+--       00010 10001 
+--3      00111 10001  reg_Lo = 1 entao op2 é somado ao reg_Hi
+--                  
+--       00011 11000 
+--4      00011 11000 reg_Lo = 0 nada altera
+--
+--       00001 11100
+--5      00001 11100 reg_Lo = 0 nada altera
+--
+--5      00000 11110 << ultimo desloque antes de terminar 
+--
+-- termina a multiplicaçao e obtemos o resultado 30 no reg_Lo
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.STD_LOGIC_1164.all;
@@ -252,11 +244,12 @@ begin
 		end if;
 	end process;
 
+   -- maquina de estados da multiplicação
 	process (PS, start, cont)
 	begin
 		case PS is
 			when Inicio => 
-				if start = '1' then
+				if start = '1' then -- quando sinal de start é ativo a maquina passa para o estado de soma
 					NS <= Soma;
 				else
 					NS <= Inicio;
@@ -265,51 +258,79 @@ begin
 			when Soma => 
 				NS <= Desloca;
 			
-      when Desloca => 
+			when Desloca => 
 				if (cont = 32) then
 					NS <= Inicio;
 				else
 					NS <= Soma;
 				end if;
+
 		end case; 
 	end process;
 
 	process (ck, start) 
 	begin
-		if ck'EVENT and ck = '1' then
+		if ck'event and ck = '1' then
 			case PS is
 				when Inicio => 
-					if start = '1' then
-						reg_Hi <= (others => '0'); 	-- reg_HI possui o resultado da multiplicação
-						reg_Lo <= op1; 				-- reg_LO possui o valor que esta sendo multiplicado
-						cont <= 0; 					-- conta ate 32 quando chegar no trinta e dois acaba o somador
+					if start = '1' then            -- inicia os signal quando o start for ativado
+						reg_Hi <= (others => '0');  -- zera o Hi
+						reg_Lo <= op1; 				
+						cont <= 0;                 -- conta ate 32 quando chegar no 32 acaba o somador
 					end if;
 					end_mult <= '0';
 
-				when Soma => 
-					if reg_Lo(0) = '1' then
+				when Soma => 	
+					if reg_Lo(0) = '1' then        -- se o primeiro bit do reg Lo for 1 devese somar o valor de op2 no reg Hi
 						reg_Hi <= reg_Hi + ('0' & op2);
 					end if;
-					cont <= cont + 1;
+					cont <= cont + 1;              -- incrementa o cont
 
 				when Desloca => 
-					if cont = 32 then
+					if cont = 32 then              -- quando cont for igual a 32 a multiplicaçao deve acabar
 						end_mult <= '1';
 					end if;
-					reg_Hi <= '0' & reg_Hi (32 downto 1); -- desloca para a direita uma casa
-					reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
+					reg_Hi <= '0' & reg_Hi (32 downto 1);            -- desloca para a direita uma casa
+					reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); 	    -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
 
 			end case;
 		end if;
 	end process;
 	 
-	P_Hi <= reg_Hi(31 downto 0);
-	A_Lo <= reg_Lo;
+	P_Hi <= reg_Hi(31 downto 0);					-- a parte do Reg_Hi vai para saida P_Hi
+	A_Lo <= reg_Lo;									-- a parte do Reg_Lo contem o resultado da multiplicação e vai para a saida A_Lo
 
 end arq_mult;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- divisao 
+-- op2 vai dividir op1 como?
+-- atraves de subtraçao sucessivas 
+-- Exemplo
+-- op1 = 11011
+-- op2 = 00101
+--
+--      reg_Hi reg_Lo
+--1      00000 11011
+--       00001 10110
+--       00001 10110  diferenca = 11100 nada altera 
+-- 
+--2      00011 01100
+--       00011 01100  diferenca = 11110 nada altera 
+--
+--3      00110 11000
+--       00001 11001  diferenca = 00001 entao altera o primeiro bit  
+--                    para '1' e aparte alta recebe o valor da diferenca
+--                  
+--4      00011 10010
+--       00011 10010  diferenca = 11110 nada altera 
+--
+--5      00111 00100
+--       00010 00101  diferenca = 00010 entao altera o primeiro bit  
+--                    para '1' e aparte alta recebe o valor da diferenca
+--
+-- obtemos o resultado 5 (quociente) no reg_Lo 
+-- e como resto da divisao temos o valor 2 no reg_Hi
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 library IEEE;
@@ -317,12 +338,12 @@ use IEEE.Std_Logic_1164.all;
 use IEEE.Std_Logic_unsigned.all;
 
 entity divide is                  
-      port( ck 				      : 	in  std_logic;
-            start 		      :   in  std_logic; 
-            op1				      :   in  std_logic_vector(31 downto 0);
-            op2				      :  	in  std_logic_vector(31 downto 0);
-            end_div 		    : 	out std_logic;
-            divisao, resto  : 	out std_logic_vector(31 downto 0)
+      port( ck               :   in  std_logic;
+            start            :   in  std_logic; 
+            op1              :   in  std_logic_vector(31 downto 0);
+            op2	           :   in  std_logic_vector(31 downto 0);
+            end_div          :   out std_logic;
+            divisao, resto   :   out std_logic_vector(31 downto 0)
           );
 end divide;
 
@@ -330,24 +351,24 @@ architecture arq_div of divide is
 		type State_type is (inicio, desloca, subtrai, termina);
 		signal PS, NS: State_type;
 
-		signal reg_Hi 		:	std_logic_vector(32 downto 0);
-		signal reg_Lo 		:	std_logic_vector(31 downto 0);
-		signal diferenca 	:	std_logic_vector(32 downto 0);
-		signal cont 		:	integer;
+		signal reg_Hi         :	std_logic_vector(32 downto 0);
+		signal reg_Lo         :	std_logic_vector(31 downto 0);
+		signal diferenca      :	std_logic_vector(32 downto 0);
+		signal cont           :	integer;
 begin
 
    process(start, ck)
    begin    
-     if PS= inicio and start='1' then
-         reg_Hi 	<= (others=>'0');
+     if PS= inicio and start='1' then       -- inicia os signal quando o start for ativado
+         reg_Hi 	<= (others=>'0');      
          reg_Lo 	<= op1;
-         cont  		<= 0;
+         cont     <= 0;                  -- contador de 1 ate 31
 
      elsif ck'event and ck='1' then 
      
-            if PS=desloca then
+            if PS=desloca then  
                 reg_Hi <= reg_Hi (31 downto 0) & reg_Lo (31);
-				        reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32);
+                reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32); 
 
             elsif PS=subtrai then  
                 if diferenca(32)='1' then  
@@ -367,14 +388,14 @@ begin
     divisao <= reg_Lo;     
     end_div  <= '1' when PS=termina else '0';
    
- 		process (ck)
+ 	process (ck)
     begin
     		if ck'event and ck='1' then  
                 PS <= NS;
       	end if;
    	end process;
 
-
+    -- maquina de estados da divisão
   	process (start, PS, cont)
   	begin
 		   case PS is
@@ -416,20 +437,21 @@ use IEEE.Std_Logic_arith.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
    
 entity datapath is
-      port(  ck, rst :     in std_logic;
-             i_address :   out std_logic_vector(31 downto 0);
-             instruction : in std_logic_vector(31 downto 0);
-             d_address :   out std_logic_vector(31 downto 0);
-             data :        inout std_logic_vector(31 downto 0);  
-             uins :        in microinstruction;
-             end_mult, end_div	:		out std_logic;
-             IR_OUT :      out std_logic_vector(31 downto 0)
+      port(  ck, rst :              in std_logic;
+             i_address :            out std_logic_vector(31 downto 0);
+             instruction :          in std_logic_vector(31 downto 0);
+             d_address :            out std_logic_vector(31 downto 0);
+             data :                 inout std_logic_vector(31 downto 0);  
+             uins :                 in microinstruction;
+             end_mult, end_div	:   out std_logic;
+             IR_OUT :               out std_logic_vector(31 downto 0)
           );
 end datapath;
 
 architecture datapath of datapath is
     signal incpc, pc, npc, IR,  result, R1, R2, RA, RB, RIN, ext16, cte_im, IMED, op1, op2, 
-           outalu, RALU, MDR, mdr_int, dtpc, D_Lo, D_Hi, Hi, Lo, mult_Lo, mult_Hi, quociente, resto : std_logic_vector(31 downto 0) := (others=> '0'); -- P_Lo R_Hi
+           outalu, RALU, MDR, mdr_int, dtpc, D_Lo, D_Hi, Hi, Lo, mult_Lo,
+           mult_Hi, quociente, resto : std_logic_vector(31 downto 0) := (others=> '0'); 
     
     signal adD, adS : std_logic_vector(4 downto 0) := (others=> '0');    
     signal inst_branch, inst_grupo1, inst_grupoI, Hi_Lo_en, end_mult_en, end_div_en: std_logic;   
@@ -520,28 +542,31 @@ begin
                         (RA<=0  and uins.i=BLEZ) or (RA/=RB and uins.i=BNE) )  else
              '0';
                   
-   -- mult/div
+   -- multiplicador
+   inst_mult: entity work.multiplica 
+                port map (ck=>ck, start=>uins.ini_mult, op1=>RA, op2=>RB, end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
 
-	inst_mult: entity work.multiplica 
-   						port map (ck=>ck, start=>uins.ini_mult, op1=>RA, op2=>RB, end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
+   -- divisor
+   inst_div: entity work.divide 
+                port map (ck=>ck, start=>uins.ini_div, op1=>RA, op2=>RB, end_div=>end_div_en, resto=>resto, divisao=>quociente);
 
+   end_mult <=	end_mult_en;   -- sinal de saida da datapath para o control_unit do mult
+   end_div  <= end_div_en;    -- sinal de saida da datapath para o control_unit do div
 
-	inst_div: entity work.divide 
-   						port map (ck=>ck, start=>uins.ini_div, op1=>RA, op2=>RB, end_div=>end_div_en, resto=>resto, divisao=>quociente);
+   D_Hi <= mult_Hi when uins.i=MULTU else    -- mux para saber de onde vem o valor do REG_Hi
+           resto; 
+   D_Lo <= mult_Lo when uins.i=MULTU else    -- mux para saber de onde vem o valor do REG_Lo
+           quociente; 
 
-	end_mult <=	end_mult_en;
-	end_div <= end_div_en;
+   Hi_Lo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or              -- signal para gerar um sinal de escrita no REG_Hi e REG_Lo
+                                            (uins.i=MULTU and end_mult_en='1'))) else '0'; 
 
-	D_Hi <= mult_Hi when uins.i=MULTU else 
-   		  	 resto; 
-  D_Lo <= mult_Lo when uins.i=MULTU else 
-   		   quociente; 
+   -- Hi register
+   REG_HI: entity work.regnbit  
+  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);
 
-  Hi_Lo_en <= '1' when (uins.walu='1' and ((uins.i=DIVU and end_div_en='1') or (uins.i=MULTU and end_mult_en='1'))) else '0';
-
-  REG_HI: entity work.regnbit  
-  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);               
-  REG_LO: entity work.regnbit  
+   -- Lo register               
+   REG_LO: entity work.regnbit  
   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);      
    --==============================================================================
    -- fourth stage
@@ -558,8 +583,8 @@ begin
        
    RMDR: entity work.regnbit  port map(ck=>ck, rst=>rst, ce=>uins.wmdr, D=>mdr_int, Q=>MDR);                 
   
- 	 result <=   Hi when uins.i=MFHI else
-               Lo when uins.i=MFLO else
+ 	result <=   Hi when uins.i=MFHI else                -- para executar a instruçao MFHi e MFLo foi acresentado
+               Lo when uins.i=MFLO else                -- essas linhas para mover os valores de Hi para result que depois vai ser salvo no REG_bank
                MDR when uins.i=LW  or uins.i=LBU else
                RALU;
    --==============================================================================
@@ -618,8 +643,8 @@ begin
     -- BLOCK (1/3) - INSTRUCTION DECODING and ALU operation definition.
     -- This block generates 1 Output Function of the Control Unit
     ----------------------------------------------------------------------------------------
-    i <=   NOP		when ir(31 downto 0) =x"00000000" else
-    			 ADDU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100001" else
+    i <=   NOP		when ir(31 downto 0)=x"00000000" else
+           ADDU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100001" else
            SUBU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100011" else
            AAND   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100100" else
            OOR    when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100101" else
@@ -651,7 +676,7 @@ begin
            J      when ir(31 downto 26)="000010" else
            JAL    when ir(31 downto 26)="000011" else
            JALR   when ir(31 downto 26)="000000"  and ir(20 downto 16)="00000"
-                                           				and ir(10 downto 0) = "00000001001" else
+                                                  and ir(10 downto 0) = "00000001001" else
            JR     when ir(31 downto 26)="000000" and ir(20 downto 0)="000000000000000001000" else
            MULTU  when ir(31 downto 26)="000000" and ir(15 downto 0)=x"0019" else
            DIVU   when ir(31 downto 26)="000000" and ir(15 downto 0)=x"001B" else
@@ -676,7 +701,7 @@ begin
                 
     uins.wmdr  <= '1' when PS=Sld            else '0';
   
-    uins.wreg   <= '1' when (PS=Swbk or (PS=Ssalta and (i=JAL or i=JALR))) and i /= NOP else  '0'; -- nop nao escreve nos banco de registrador (tem que testar)
+    uins.wreg   <= '1' when (PS=Swbk or (PS=Ssalta and (i=JAL or i=JALR))) and i /= NOP else  '0'; -- nop nao escreve nos banco de registrador 
    
     uins.rw    <= '0' when PS=Sst            else  '1';
                   
