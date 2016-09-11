@@ -466,13 +466,24 @@ begin
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
    RIR: entity work.regnbit  
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_instruction, Q=>instruction);
-					
-   ir <= instruction;
-   rs <= instruction(25 downto 21);
-   rt <= instruction(20 downto 16);
-   rd <= instruction(15 downto 11);
-   ext <= instruction(15 downto 0);
-
+	process(ck, rst)
+		begin
+		if rst = '1' then
+			ir <= (others => '0');
+			rs <= (others => '0');
+			rd <= (others => '0');
+			rt <= (others => '0');
+			ext <= (others => '0');
+		elsif ck'event and ck = '0' then
+			if en = '1' then				
+				ir <= instruction;
+				rs <= instruction(25 downto 21);
+				rt <= instruction(20 downto 16);
+				rd <= instruction(15 downto 11);
+				ext <= instruction(15 downto 0);
+			end if;
+		end if;
+	end process;
 end arq_BI_DI;
 
 --++++++++++++++++++++++++++++++++
@@ -662,6 +673,7 @@ entity datapath is
              d_address :            out std_logic_vector(31 downto 0);
              data :                 inout std_logic_vector(31 downto 0);  
              uins :                 in microinstruction;
+				 uins_MEM_out :             out microinstruction;
              end_mult, end_div	:  out std_logic;
              IR_OUT :               out std_logic_vector(31 downto 0)
           );
@@ -813,7 +825,8 @@ begin
    --==============================================================================
      
    d_address <= RALU;
-    
+   uins_MEM_out <= uins_MEM;
+	
    -- tristate to control memory write    
    data <= EscMem when (uins_MEM.ce='1' and uins_MEM.rw='0') else (others=>'Z');  
 
@@ -821,12 +834,9 @@ begin
    mdr_int <= data when uins_MEM.i=LW  else
               x"000000" & data(7 downto 0);
                         
-  
-
-					
 	Mem_ER : entity work.Mem_ER
 			 	   port map( ck => ck, rst => rst, in_uins => uins_MEM, D_RALU => RALU,
-  				 				 D_MDR => mdr_int, D_rd => adD_MEM,	 uins_ER => uins_ER, RALU_ER => result,
+  				 				 D_MDR => mdr_int, D_rd => adD_MEM,	uins_ER => uins_ER, RALU_ER => result,
   				 	 			 MDR => MDR, rd => adD_ER);				
 
    --==============================================================================
@@ -834,8 +844,8 @@ begin
    --==============================================================================
 
 	-- signal to be written into the register bank
- 	RIN <= npc_EX when (uins.i=JALR or uins.i=JAL) else 
-			 MDR  when uins_MEM.i=LW  or uins.i=LBU else
+ 	RIN <= npc_EX when (uins_ER.i=JALR or uins_ER.i=JAL) else 
+			 MDR  when uins_ER.i=LW  or uins_ER.i=LBU else
 			 result;
    
    -- register bank write address selection
@@ -940,13 +950,13 @@ begin
 		
 	 uins.RegDst <= '1' when inst_font = "00" else '0';
 
-    uins.wreg   <= '1' when ((inst_font /= "11" or (i=JAL or i=JALR))) and i /= NOP else  '0'; -- nop nao escreve nos banco de registrador 
+    uins.wreg   <= '1' when ((inst_font /= "11" or (i=JAL or i=JALR))) and (i /= NOP or i/= SW or i/=SB) else  '0'; -- nop nao escreve nos banco de registrador 
    
     uins.rw    <= '0' when i=SB or i=SW else  '1';
                   
-    uins.ce    <= '1' when i=LBU  or i=LW or i=SB or i=SW  else '0';
+    uins.ce    <= '1' when (i=LBU  or i=LW) or (i=SB or i=SW)  else '0';
     
-    uins.bw    <= '0' when i=SB  else '1';
+    uins.bw    <= '0' when i=SB else '1';
       
    -- uins.wpc   <= '1' when ck'event and ck = '0' else '0'; --when PS=Swbk or PS=Sst or PS=Ssalta  
    							--			  or (PS=Salu and ((i=DIVU and end_div='1') or (i=MULTU and end_mult='1'))) else
@@ -1037,19 +1047,19 @@ end MRstd;
 
 architecture MRstd of MRstd is
       signal IR: std_logic_vector(31 downto 0);
-      signal uins: microinstruction;
+      signal uins, uins_MEM: microinstruction;
       signal end_mult, end_div : std_logic;
  begin
 
      dp: entity work.datapath   
-         port map( ck=>clock, rst=>reset, IR_OUT=>IR, uins=>uins, i_address=>i_address, 
+         port map( ck=>clock, rst=>reset, IR_OUT=>IR, uins=>uins, uins_MEM_out=> uins_MEM, i_address=>i_address, 
                    instruction=>instruction, d_address=>d_address,  data=>data,
                    end_mult=>end_mult, end_div=>end_div);
 
      ct: entity work.control_unit port map( ck=>clock, rst=>reset, IR=>IR, end_mult => end_mult, end_div => end_div, uins=>uins);
          
-     ce <= uins.ce;
-     rw <= uins.rw; 
-     bw <= uins.bw;
+     ce <= uins_MEM.ce;
+     rw <= uins_MEM.rw; 
+     bw <= uins_MEM.bw;
      
 end MRstd;

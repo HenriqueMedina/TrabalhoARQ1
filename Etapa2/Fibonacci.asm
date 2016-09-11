@@ -6,15 +6,17 @@ size:		.word 20
 			.globl main
 
 main:
-		la			$s0, sequencia		# carrega o endereco de sequencia
-		nop								# nop entre lui e ori da para optimizar 
+		lui			$at, 4097
 		nop
-		la			$s1, size			# carrga o endereco de size
+		nop
+		ori			$s0,$at,0
+		lui			$at, 4097
+		nop
+		nop
+		ori			$s1,$at,80
 		nop
 		nop
 		lw			$s1,0($s1)			# recupera o vaor de size que eh a quantidade de numeros a ser gerados pelo fibonaccp
-		nop
-		nop
 		addiu		$t1,$zero,0			# inicia o $t0 e $t1 com os primeiros valores da sequencia
 		addiu		$t2,$zero,1			# 
 		nop
@@ -34,5 +36,11 @@ loop:
 		nop
 		sw			$t2,0($s0)			# grava o valor no vetor da memoria
 		j			loop				# pula para o loop
+		nop
+		nop
+		nop
 fim:	
 		j			fim					# loop de fim do programa 
+		nop
+		nop
+		nop
