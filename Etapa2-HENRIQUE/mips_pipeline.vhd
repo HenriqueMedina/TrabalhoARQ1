@@ -43,8 +43,7 @@ package p_MRstd is
             ini_mult:   std_logic;      -- sinal de controle para incio mult
             ini_div:    std_logic;      --sinal de controle para incio divi
    end record;
-	
-	
+
 end p_MRstd;
 
 
@@ -502,8 +501,10 @@ entity DI_EX is
             D_incpc :               in std_logic_vector(31 downto 0);
             D_R1 :                  in std_logic_vector(31 downto 0);
             D_R2 :                  in std_logic_vector(31 downto 0);
-            D_IMED :                in std_logic_vector(31 downto 0);
-            D_rs :                  in std_logic_vector(4 downto 0);
+            D_ext16 :               in std_logic_vector(31 downto 0);
+            D_shift2 :              in std_logic_vector(31 downto 0);
+            D_aD_jump :             in std_logic_vector(31 downto 0);
+            D_ext_zero :            in std_logic_vector(31 downto 0);
             D_rd :                  in std_logic_vector(4 downto 0);
             D_rt :                  in std_logic_vector(4 downto 0);
 
@@ -511,8 +512,10 @@ entity DI_EX is
             npc :                   out std_logic_vector(31 downto 0);
             RA :                    out std_logic_vector(31 downto 0);
             RB :                    out std_logic_vector(31 downto 0);
-            IMEDS :                 out std_logic_vector(31 downto 0);
-            rs :                    out std_logic_vector(4 downto 0);
+            Q_ext16 :               out std_logic_vector(31 downto 0);
+            Q_shift2 :              out std_logic_vector(31 downto 0);
+            Q_aD_jump :             out std_logic_vector(31 downto 0);
+            Q_ext_zero :            out std_logic_vector(31 downto 0);
             rd :                    out std_logic_vector(4 downto 0);
             rt :                    out std_logic_vector(4 downto 0)
           );
@@ -534,19 +537,27 @@ begin
    REG_T:  entity work.regnbit 
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_R2, Q=>RB);
 
-   REG_EXT:  entity work.regnbit 
-               port map(ck=>ck, rst=>rst, ce=>en, D=>D_IMED, Q=>IMEDs);
-					
+   REG_EXT16:  entity work.regnbit 
+               port map(ck=>ck, rst=>rst, ce=>en, D=>D_ext16, Q=>Q_ext16);
+
+   REG_shift2:  entity work.regnbit 
+                port map(ck=>ck, rst=>rst, ce=>en, D=>D_shift2, Q=>Q_shift2);
+
+   REG_aD_jump:  entity work.regnbit 
+                 port map(ck=>ck, rst=>rst, ce=>en, D=>D_aD_jump, Q=>Q_aD_jump);
+   				
+   REG_ext_zero:  entity work.regnbit 
+                 port map(ck=>ck, rst=>rst, ce=>en, D=>D_ext_zero, Q=>Q_ext_zero);             
+                 
+                   
 	process(ck, rst)
     begin
          if rst = '1' then
-            rs <= (others => '0');
             rd <= (others => '0');
             rt <= (others => '0');
          elsif ck'event and ck = '0' then
              if en = '1' then
                uins_EX <= in_uins;
-               rs <= D_rs;
                rd <= D_rd;
                rt <= D_rt;
              end if;
@@ -569,11 +580,13 @@ entity EX_MEM is
             in_uins :               in microinstruction;
             D_outAlu :              in std_logic_vector(31 downto 0);
             D_EscMem :              in std_logic_vector(31 downto 0);
+            D_npc :                 in std_logic_vector(31 downto 0);
             D_rd :                  in std_logic_vector(4 downto 0);
 
             uins_Mem :              out microinstruction;
             RALU :                  out std_logic_vector(31 downto 0);
             EscMem :                out std_logic_vector(31 downto 0);
+            npc :                   out std_logic_vector(31 downto 0);
             rd :                    out std_logic_vector(4 downto 0)
       );
 end EX_MEM;
@@ -584,6 +597,9 @@ architecture arq_EX_MEM of EX_MEM is
 begin
    en <= '1';
 	
+   RNPC: entity work.regnbit 
+               port map(ck=>ck, rst=>rst, ce=>en, D=>D_npc, Q=>npc);
+   
    REG_alu: entity work.regnbit  
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_outAlu, Q=>RALU);  
 	
@@ -619,10 +635,12 @@ entity Mem_ER is
              in_uins :              in microinstruction;
              D_RALU :               in std_logic_vector(31 downto 0);
              D_MDR :                in std_logic_vector(31 downto 0);
+             D_npc :                in std_logic_vector(31 downto 0);
              D_rd :                 in std_logic_vector(4 downto 0);
              
              uins_ER :              out microinstruction;
              RALU_ER :              out std_logic_vector(31 downto 0);
+             npc :                  out std_logic_vector(31 downto 0);
              MDR :                  out std_logic_vector(31 downto 0);
              rd :                   out std_logic_vector(4 downto 0)
           );
@@ -634,6 +652,9 @@ architecture arq_Mem_ER of Mem_ER is
 begin
    en <= '1';
 	
+   RNPC: entity work.regnbit 
+               port map(ck=>ck, rst=>rst, ce=>en, D=>D_npc, Q=>npc);
+   
    REG_RALU: entity work.regnbit  
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_RALU, Q=>RALU_ER);  
 	
@@ -680,34 +701,58 @@ entity datapath is
 end datapath;
 
 architecture datapath of datapath is
-    signal incpc, pc, IR, npc_DI, npc_EX, result, R1, R2, RA, RB, RIN, ext16, cte_im, IMED, op1, op2, 
-           outalu, RALU, MDR, mdr_int, dtpc, D_Lo, D_Hi, Hi, Lo, mult_Lo, EscMem, RALU_ER, Routalu,
-           mult_Hi, quociente, resto : std_logic_vector(31 downto 0) := (others=> '0'); 
-    
-	 
-    signal ext : std_logic_vector(15 downto 0) := (others => '0');
-	-- signal IR : std_logic_vector(5 downto 0) := (others => '0');
-    
-    signal inst_branch, inst_grupo1, inst_grupoI, Hi_Lo_en, end_mult_en, end_div_en: std_logic;   
-    signal salta : std_logic := '0';
+   --==============================================================================
+   -- signal usado no BI
+   signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0'); 
+   --==============================================================================
+   
+   --==============================================================================
+   -- signal usados no DI
+   signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
+   signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
+   signal ext : std_logic_vector(15 downto 0) := (others => '0');
+   --==============================================================================
+   
+   --==============================================================================
+   -- signal usados no EX
+   signal npc_EX, RA, RB, ext16_EX, shift2_EX, aD_jump_EX, ext_zero_EX, 
+          IMED, RA_inst, op1, op2, RALU, outalu : std_logic_vector (31 downto 0);
+   signal uins_EX : microinstruction;
+   signal adRD, adRD_EX, adRT_EX : std_logic_vector (4 downto 0);
+   signal Hi_Lo_en, end_mult_en, end_div_en, jump, salta : std_logic;
+   signal D_Lo, D_Hi, Hi, Lo, mult_Hi, mult_Lo, resto, quociente  : std_logic_vector (31 downto 0);
+   --==============================================================================
+   
+   --==============================================================================
+   -- signal usados no MEM
+   signal uins_MEM : microinstruction;
+   signal RALU_MEM, EscMem, mdr_int, npc_MEM : std_logic_vector(31 downto 0);
+   signal adRD_MEM : std_logic_vector(4 downto 0);
+   --==============================================================================
+   
+   --==============================================================================
+   -- signal usados no ER
+   signal uins_ER : microinstruction;
+   signal result, MDR, npc_ER, RIN : std_logic_vector(31 downto 0);
+   signal adRD_ER : std_logic_vector(4 downto 0);
+   --==============================================================================
+   
+   signal inst_branch, inst_grupo1, inst_grupoI : std_logic;   
 
-    signal adD, adS, adS_DI, adD_DI, adRT, adS_EX, adD_EX, adD_ER, adRT_EX, adD_MEM : std_logic_vector(4 downto 0) := (others=> '0');
-    signal uins_EX, uins_MEM, uins_ER :      microinstruction; -- sinais de controle das etapas EX MEM e ER
 
 begin
 
    
    --==============================================================================
-   -- first_stage
+   --==============================================================================
+   -- first_stage = BI
 	-- primeiro estagio deve buscar uma nova instrução a cada borda do clock
+   --==============================================================================
    --==============================================================================
   
    incpc <= pc + 4; -- incrementa o pc 
-	
-     -- salva o valor incrementado
-  
-	dtpc <= incpc; --result when (inst_branch='1' and salta='1') or uins.i=J or uins.i=JAL or uins.i=JALR or uins.i=JR  
-		--else incpc; -- mux pc
+	  
+	dtpc <= outalu when jump = '1' else incpc; 
    
    -- Code memory starting address: beware of the OFFSET! 
    -- The one below (x"00400000") serves for code generated 
@@ -721,144 +766,180 @@ begin
 	Bi_Di : entity work.BI_DI
 					port map(
 					ck => ck, rst => rst, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
-					ir => ir, rs => adS_DI,	rt => adRT, rd => adD_DI, ext => ext);
+					ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
    
    --==============================================================================
-   -- second stage
    --==============================================================================
-                
-   -- The then clause is only used for logic shifts with shamt field       
+   -- second stage = DI
+   --==============================================================================
+   --==============================================================================
    
-	IR_OUT <= ir;
+	IR_OUT <= ir; -- decodifica a instrução
 	       
-   REGS: entity work.reg_bank(reg_bank) port map
-        (ck=>ck, rst=>rst, wreg=>uins.wreg, AdRs=>adS_DI, AdRt=>adRT, adRD=>adD_ER,  
-         Rd=>RIN, R1=>R1, R2=>R2); -- EacReg =~ wreg
+   REGS: entity work.reg_bank(reg_bank) 
+               port map ( ck=>ck, rst=>rst, wreg=>uins_ER.wreg, AdRs=>adRS_DI, 
+                          AdRt=>adRT_DI, adRD=>adRD_ER, Rd=>RIN, R1=>R1, R2=>R2); 
     
-   -- sign extension 
-   ext16 <=  x"FFFF" & ext when ext(15)='1' else
-             x"0000" & ext;
-				 
-
-	Di_Ex : entity work.DI_EX
-			 	   port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, D_R1 => R1, D_rt => adRT,
-			 					 D_R2 => R2, D_IMED => ext16, D_rs => adS_DI, D_rd => adD_DI, uins_EX => uins_EX,
-			 					 npc => npc_EX, RA => RA, RB => RB, IMEDS => IMED, rs => adS_EX, rd => adD_EX, rt => adRT_EX);         
-	
- 
- 
-  --==============================================================================
-   -- third stage
    --==============================================================================
-	-- Immediate constant
+   -- extençao de sinais para uso de Immediate
+   ext16    <=  x"FFFF" & ext when ext(15)='1' else
+                x"0000" & ext;
+	shift2   <= ext16(29 downto 0)  & "00";			 
+   aD_jump  <= "0000" & ir(25 downto 0) & "00";
+   ext_zero <= x"0000" & ext;
+   --==============================================================================
+   
+   -- Barreira DI_EX -- nao modifiquei ainda.
+	Di_Ex : entity work.DI_EX  
+			 	   port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, 
+                        D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
+                        D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,  
+                        D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA, 
+                        RB => RB, Q_ext16 => ext16_EX, Q_shift2 => shift2_EX, 
+                        Q_aD_jump => aD_jump_EX, Q_ext_zero => ext_zero_EX, rd => adRD_EX, 
+                        rt => adRT_EX);         
+                         
+   --==============================================================================
+   --==============================================================================
+   -- third stage = EX
+   --==============================================================================
+   --==============================================================================
 	
-	adD <= "11111" when uins_EX.i=JAL else
-	   	  adD_EX when uins_EX.RegDst = '1' else
+   --==============================================================================
+   -- Immediate constant
+	IMED <= shift2_EX   when inst_branch='1' else -- gerar o signal branch
+           aD_jump_EX  when uins_EX.i=J or uins_EX.i=JAL else 
+           ext_zero_EX when uins_EX.i=ANDI or uins_EX.i=ORI  or uins_EX.i=XORI else
+           ext16_EX;
+   --==============================================================================
+   
+   --==============================================================================
+   -- MUX endereco registrador destino   
+	adRD <= "11111" when uins_EX.i=JAL else
+	   	  adRD_EX when uins_EX.RegDst = '1' else -- instruçao tipo R e sll sllv ...
 			  adRT_EX;
-	 
-                -- The default case is used by addiu, lbu, lw, sbu and sw instructions
-	-- auxiliary signals 
-                   
-   -- select the first ALU operand                           
+	--==============================================================================
+   
+   --==============================================================================
+   -- MUX para levar o valor que vai ser assumido no op1 da ula   
+   RA_inst <= RB when uins_EX.i=SSLL or uins_EX.i=SSRA or uins_EX.i=SSRL else 
+              RA;            
+   
    op1 <= npc_EX  when uins_EX.ULAFonte = "11" else 
-          RA; 
-     
-   -- select the second ALU operand
-   op2 <= RB when uins_EX.ULAFonte = "00" else --- <<<<< melhorar isso depois (isso vai para extençao de sinal)
-			IMED(29 downto 0)  & "00" when uins_EX.ULAFonte = "11" else
-					 -- branch address adjustment for word frontier
-				 "0000" & adRT_EX & adS_EX & IMED(15 downto 0) & "00" when uins_EX.i=J or uins_EX.i=JAL else
-					 -- J/JAL are word addressed. MSB four bits are defined at the ALU, not here!
-				 x"0000" & IMED(15 downto 0) when uins_EX.i=ANDI or uins_EX.i=ORI  or uins_EX.i=XORI else
-					 -- logic instructions with immediate operand are zero extended
-				 IMED; 
-                 
+          RA_inst; 
+   --==============================================================================  
+   
+   --==============================================================================
+   -- mux para gerar o segundo operando da ULA
+   op2 <= RB when uins_EX.ULAFonte = "00" else --- <<<<< melhorar isso depois (isso vai para extençao de sinal "inst_grupo1 ='1'")
+          IMED;        
+   --==============================================================================
+                                  
    -- ALU instantiation
-   inst_alu: entity work.alu port map (op1=>op1, op2=>op2, outalu=>Routalu, op_alu=>uins_EX.i);
-                                   
-	outalu <=   Hi when uins_EX.i=MFHI else                -- para executar a instrucao MFHi e MFLo foram acresentadas
-               Lo when uins_EX.i=MFLO else
-               Routalu; 
- 
+   inst_alu: entity work.alu 
+                port map (op1=>op1, op2=>op2, outalu=>outalu, op_alu=>uins_EX.i);
+   
+   --==============================================================================
+   -- mux saida da outalu                                
+	RALU <=  Hi when uins_EX.i=MFHI else                -- para executar a instrucao MFHi e MFLo foram acresentadas
+            Lo when uins_EX.i=MFLO else
+            outalu; 
+   --==============================================================================
+
+   --==============================================================================
    -- evaluation of conditions to take the branch instructions
-   salta <=  '1' when ( (RA=RB  and uins_EX.i=BEQ)  or (RA>=0  and uins_EX.i=BGEZ) or
-                        (RA<=0  and uins_EX.i=BLEZ) or (RA/=RB and uins_EX.i=BNE) )  else
+   -- condicao de salto 
+   salta <=  '1' when ((RA=RB  and uins_EX.i=BEQ)  or (RA>=0  and uins_EX.i=BGEZ) or
+                        (RA<=0  and uins_EX.i=BLEZ) or (RA/=RB and uins_EX.i=BNE)) else
              '0';
-                  
+   jump <= '1' when (inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL 
+                                            or uins_EX.i=JALR or uins_EX.i=JR else
+           '0';
+   --==============================================================================
+   
+   --==============================================================================
    -- multiplicador
    inst_mult: entity work.multiplica 
                 port map (ck=>ck, start=>uins_EX.ini_mult, op1=>RA, op2=>RB, 
 					 				end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
-
+   end_mult <=	end_mult_en;   -- sinal de saida da datapath para o control_unit do mult
+   --==============================================================================
+   
+   --==============================================================================
    -- divisor
    inst_div: entity work.divide 
                 port map (ck=>ck, start=>uins_EX.ini_div, op1=>RA, op2=>RB, 
 					 				end_div=>end_div_en, resto=>resto, divisao=>quociente);
-
-   end_mult <=	end_mult_en;   -- sinal de saida da datapath para o control_unit do mult
    end_div  <= end_div_en;    -- sinal de saida da datapath para o control_unit do div
-
+   --==============================================================================
+   
+   --==============================================================================
+   -- habilita escrita no registrador Hi e LO
+   Hi_Lo_en <= '1' when (((uins_EX.i=DIVU and end_div_en='1') or              -- signal para gerar um sinal de escrita no REG_Hi e REG_Lo
+                         (uins_EX.i=MULTU and end_mult_en='1'))) else '0'; 
+   --==============================================================================
+   
+   --==============================================================================
+   -- Hi register
    D_Hi <= mult_Hi when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Hi
            resto; 
-   D_Lo <= mult_Lo when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Lo
-           quociente; 
-
-   Hi_Lo_en <= '1' when (((uins_EX.i=DIVU and end_div_en='1') or              -- signal para gerar um sinal de escrita no REG_Hi e REG_Lo
-                                            (uins_EX.i=MULTU and end_mult_en='1'))) else '0'; 
-
-   -- Hi register
    REG_HI: entity work.regnbit  
   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);
-
+   --==============================================================================
+   
+   --==============================================================================
    -- Lo register               
+   D_Lo <= mult_Lo when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Lo
+           quociente; 
    REG_LO: entity work.regnbit  
   				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);  
-				
-				
-	Ex_Mem : entity work.EX_MEM
-			 	   port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => outalu,
-  				 				 D_EscMem => RB, D_rd => adD,	 uins_Mem => uins_MEM, RALU => RALU,
-  				 	 			 EscMem => EscMem, rd => adD_MEM);	
+	--==============================================================================
+	
+   Ex_Mem : entity work.EX_MEM
+			 	   port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => RALU,
+  				 		D_EscMem => RB, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM, 
+                  RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);	
 						    
+   --==============================================================================
    --==============================================================================
    -- fourth stage
    --==============================================================================
-     
-   d_address <= RALU;
-   uins_MEM_out <= uins_MEM;
+   --==============================================================================
+   
+   --==============================================================================
+   -- acessar a memoria de dados
+   d_address <= RALU_MEM; -- endereco da posicao memoria
+   uins_MEM_out <= uins_MEM; -- sinais para habilitar a leitura/escrita
+   --==============================================================================
 	
+   --==============================================================================
    -- tristate to control memory write    
    data <= EscMem when (uins_MEM.ce='1' and uins_MEM.rw='0') else (others=>'Z');  
+   --==============================================================================
 
+   --==============================================================================
    -- single byte reading from memory  -- SUPONDO LITTLE ENDIAN
    mdr_int <= data when uins_MEM.i=LW  else
               x"000000" & data(7 downto 0);
-                        
-	Mem_ER : entity work.Mem_ER
-			 	   port map( ck => ck, rst => rst, in_uins => uins_MEM, D_RALU => RALU,
-  				 				 D_MDR => mdr_int, D_rd => adD_MEM,	uins_ER => uins_ER, RALU_ER => result,
-  				 	 			 MDR => MDR, rd => adD_ER);				
-
+   --==============================================================================
+	
+   Mem_ER : entity work.Mem_ER
+			 	   port map( ck => ck, rst => rst, in_uins => uins_MEM, D_RALU => RALU_MEM,
+  				 				 D_MDR => mdr_int, D_rd => adRD_MEM, D_npc => npc_MEM,
+                         uins_ER => uins_ER, RALU_ER => result, npc => npc_ER,
+  				 	 			 MDR => MDR, rd => adRD_ER);				
+                                               
+   --==============================================================================
    --==============================================================================
    -- fifth stage
    --==============================================================================
+   --==============================================================================
 
+   
 	-- signal to be written into the register bank
- 	RIN <= npc_EX when (uins_ER.i=JALR or uins_ER.i=JAL) else 
+ 	RIN <= npc_ER when (uins_ER.i=JALR or uins_ER.i=JAL) else 
 			 MDR  when uins_ER.i=LW  or uins_ER.i=LBU else
 			 result;
-   
-   -- register bank write address selection
-   --adD <= "11111"               when uins.i=JAL else -- JAL writes in register $31
-   --      IR(15 downto 11)       when inst_grupo1='1' or uins.i=SLTU or uins.i=SLT
-   --                                                  or uins.i=JALR  
-	--					     or uins.i=SSLL or uins.i=SLLV
-	--					     or uins.i=SSRA or uins.i=SRAV
-	--					     or uins.i=SSRL or uins.i=SRLV
-	--					     or uins.i=MFHI or uins.i=MFLO else --- endereso salvar no banco de dados
-   --      IR(20 downto 16) -- inst_grupoI='1' or uins.i=SLTIU or uins.i=SLTI 
-   --     ;                 -- or uins.i=LW or  uins.i=LBU  or uins.i=LUI, or default
-    
 
 
 end datapath;
