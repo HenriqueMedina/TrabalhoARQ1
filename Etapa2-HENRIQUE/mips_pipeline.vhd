@@ -37,7 +37,9 @@ package p_MRstd is
             ce:         std_logic;       -- Chip enable and R_W controls			
             rw:         std_logic;
             bw:         std_logic;       -- Byte-word control (mem write only)
-            ULAFonte:   std_logic_vector(1 downto 0);       
+            inst_grupo1: std_logic;
+				inst_branch: std_logic;
+				inst_grupoI: std_logic;       
             RegDst:     std_logic;  
             i:          inst_type;       -- operation specification
             ini_mult:   std_logic;      -- sinal de controle para incio mult
@@ -736,13 +738,9 @@ architecture datapath of datapath is
    signal result, MDR, npc_ER, RIN : std_logic_vector(31 downto 0);
    signal adRD_ER : std_logic_vector(4 downto 0);
    --==============================================================================
-   
-   signal inst_branch, inst_grupo1, inst_grupoI : std_logic;   
-
 
 begin
 
-   
    --==============================================================================
    --==============================================================================
    -- first_stage = BI
@@ -807,7 +805,7 @@ begin
 	
    --==============================================================================
    -- Immediate constant
-	IMED <= shift2_EX   when inst_branch='1' else -- gerar o signal branch
+	IMED <= shift2_EX   when uins_EX.inst_branch='1' else
            aD_jump_EX  when uins_EX.i=J or uins_EX.i=JAL else 
            ext_zero_EX when uins_EX.i=ANDI or uins_EX.i=ORI  or uins_EX.i=XORI else
            ext16_EX;
@@ -815,7 +813,7 @@ begin
    
    --==============================================================================
    -- MUX endereco registrador destino   
-	adRD <= "11111" when uins_EX.i=JAL else
+	adRD <= "11111" when uins_EX.i=JAL else -- endereco $RA
 	   	  adRD_EX when uins_EX.RegDst = '1' else -- instruçao tipo R e sll sllv ...
 			  adRT_EX;
 	--==============================================================================
@@ -824,14 +822,15 @@ begin
    -- MUX para levar o valor que vai ser assumido no op1 da ula   
    RA_inst <= RB when uins_EX.i=SSLL or uins_EX.i=SSRA or uins_EX.i=SSRL else 
               RA;            
-   
-   op1 <= npc_EX  when uins_EX.ULAFonte = "11" else 
+				  
+   op1 <= npc_EX  when uins_EX.inst_branch = '1' else 
           RA_inst; 
    --==============================================================================  
    
    --==============================================================================
    -- mux para gerar o segundo operando da ULA
-   op2 <= RB when uins_EX.ULAFonte = "00" else --- <<<<< melhorar isso depois (isso vai para extençao de sinal "inst_grupo1 ='1'")
+   op2 <= RB when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR 
+                  or uins_EX.i=SLLV or uins_EX.i=SRAV or uins_EX.i=SRLV else 
           IMED;        
    --==============================================================================
                                   
@@ -852,8 +851,8 @@ begin
    salta <=  '1' when ((RA=RB  and uins_EX.i=BEQ)  or (RA>=0  and uins_EX.i=BGEZ) or
                         (RA<=0  and uins_EX.i=BLEZ) or (RA/=RB and uins_EX.i=BNE)) else
              '0';
-   jump <= '1' when (inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL 
-                                            or uins_EX.i=JALR or uins_EX.i=JR else
+   jump <= '1' when (uins_EX.inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL 
+                                                            or uins_EX.i=JALR or uins_EX.i=JR else
            '0';
    --==============================================================================
    
@@ -965,7 +964,7 @@ architecture control_unit of control_unit is
    type type_state is (Sidle, Sfetch, Sreg, Salu, Swbk, Sld, Sst, Ssalta);
    signal PS, NS : type_state;
    signal i : inst_type;  
-	signal inst_font : std_logic_vector(1 downto 0) ;
+	signal inst_grupo11, inst_branchh, inst_grupoII: std_logic;
 begin
       
     ----------------------------------------------------------------------------------------
@@ -1021,93 +1020,41 @@ begin
 
     ----------------------------------------------------------------------------------------
     -- BLOCK (2/3) - DATAPATH REGISTERS load control signals generation.
-    ----------------------------------------------------------------------------------------
-  
-    uins.ULAFonte <= inst_font;
-	 inst_font <= "01" when i=ADDIU or i=ANDI or i=ORI or i=XORI or i=LUI or i=SLTU or 
-					  			  i=SLTI or i=LW or i=LBU or i=SW or i=SB else
-					 "11" when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else
-  					 "00";
-		
-	 uins.RegDst <= '1' when inst_font = "00" else '0';
+    ----------------------------------------------------------------------------------------	
+	 inst_branchh  <= '1' when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else 
+                   '0';
+                   
+    inst_grupo11  <= '1' when i=ADDU or i=SUBU or i=AAND
+                          or i=OOR or i=XXOR or i=NNOR else
+                    '0';
+ 
+    inst_grupoII  <= '1' when i=ADDIU or i=ANDI or i=ORI or i=XORI else
+                    '0';
+  	
+	uins.inst_branch <= inst_branchh;
+ 	uins.inst_grupo1 <= inst_grupo11;
+ 	uins.inst_grupoI <= inst_grupoII;
+	
+	 uins.RegDst <= '1' when inst_grupo11='1' or i=SLTU or i=SLT
+														  or i=JALR  
+						                          or i=SSLL or i=SLLV
+						                          or i=SSRA or i=SRAV
+						                          or i=SSRL or i=SRLV
+						                          or i=MFHI or i=MFLO else 
+						'0';
 
-    uins.wreg   <= '1' when ((inst_font /= "11" or (i=JAL or i=JALR))) and (i /= NOP or i/= SW or i/=SB) else  '0'; -- nop nao escreve nos banco de registrador 
+    uins.wreg   <= '0' when (inst_branchh = '1' or (i=J or i=JR) or
+	 	  							 i = NOP or (i=SW or i=SB) or i=MULTU or i=DIVU) else  '1'; -- nop nao escreve nos banco de registrador 
    
     uins.rw    <= '0' when i=SB or i=SW else  '1';
                   
-    uins.ce    <= '1' when (i=LBU  or i=LW) or (i=SB or i=SW)  else '0';
+    uins.ce    <= '1' when (i=LBU or i=LW) or (i=SB or i=SW)  else '0';
     
     uins.bw    <= '0' when i=SB else '1';
-      
-   -- uins.wpc   <= '1' when ck'event and ck = '0' else '0'; --when PS=Swbk or PS=Sst or PS=Ssalta  
-   							--			  or (PS=Salu and ((i=DIVU and end_div='1') or (i=MULTU and end_mult='1'))) else
-   			  				--'0';
 
     uins.ini_mult  <= '1' when i=MULTU else '0';
   
     uins.ini_div  <= '1' when i=DIVU else '0';
-    ---------------------------------------------------------------------------------------------
-    -- BLOCK (3/3) - Sequential part of the control unit - two processes implementing the
-    -- Control Unit state register and the next-state (combinational) function
-    --------------------------------------------------------------------------------------------- 
---    process(rst, ck)
---    begin
---       if rst='1' then
---            PS <= Sidle;          -- Sidle is the state the machine stays while processor is being reset
---       elsif ck'event and ck='1' then
---       
---            if PS=Sidle then
---                  PS <= Sfetch;
---            else
---                  PS <= NS;
---            end if;
---                
---       end if;
---    end process;
-     
-     
---    process(PS, i, end_mult, end_div)
---    begin
---       case PS is         
----      
----            when Sidle=>NS <= Sidle; -- reset being active, the processor do nothing!       
---
---            -- first stage:  read the current instruction 
---            --
---            when Sfetch=>NS <= Sreg;  
---     
-            -- second stage: read the register banck and store the mask (when i=stmsk)
-            --
---            when Sreg=>NS <= Salu;  
-             
-            -- third stage: alu operation 
-            --
---            when Salu =>if i=LBU  or i=LW then 
---                                NS <= Sld;  
---                          elsif i=SB or i=SW then 
---                                NS <= Sst;
---                         elsif i=J or i=JAL or i=JALR or i=JR or i=BEQ
---                                    or i=BGEZ or i=BLEZ  or i=BNE then 
---                             NS <= Ssalta;
---                          elsif ((i=MULTU and end_mult='0') or (i=DIVU and end_div='0')) then
---                                NS <= Salu;
---                          elsif ((i=DIVU and end_div='1') or (i=MULTU and end_mult='1')) then  
---                                NS <= Sfetch;  
---                          else 
---                                NS <= Swbk; 
---                          end if;
-                         
-            -- fourth stage: data memory operation  
-            --
---            when Sld=>  NS <= Swbk; 
-            
-            -- fifth clock cycle of most instructions  - GO BACK TO FETCH
-            -- 
---            when Sst | Ssalta | Swbk=>NS <= Sfetch;
-  
---       end case;
-
---    end process;
     
 end control_unit;
 
