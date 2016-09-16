@@ -56,7 +56,8 @@ library IEEE;
 use IEEE.std_logic_1164.all;
 
 entity regnbit is
-           generic( INIT_VALUE : STD_LOGIC_VECTOR(31 downto 0) := (others=>'0') );
+           generic( INIT_VALUE : STD_LOGIC_VECTOR(31 downto 0) := (others=>'0');
+			   		  borda : std_logic := '0' );
            port(  ck, rst, ce : in std_logic;
                   D : in  STD_LOGIC_VECTOR (31 downto 0);
                   Q : out STD_LOGIC_VECTOR (31 downto 0)
@@ -70,7 +71,7 @@ begin
   begin
        if rst = '1' then
               Q <= INIT_VALUE(31 downto 0);
-       elsif ck'event and ck = '0' then
+       elsif ck'event and ck = borda then
            if ce = '1' then
               Q <= D; 
            end if;
@@ -111,22 +112,23 @@ begin
         -- near the bottom of the data memory, not the usual place 
 		-- assigned by the MIPS simulator!!
         g2: if i=29 generate -- SP ---  x10010000 + x800 -- top of stack
-           r29: entity work.regnbit generic map(INIT_VALUE=>x"10010800")    
-                                  port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));
+           r29: entity work.regnbit 
+			  					generic map(INIT_VALUE=>x"10010800", borda=>'1')    
+                        port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));
         end generate;  
                 
         g3: if i/=29 generate 
-           rx: entity work.regnbit port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));                    
+           rx: entity work.regnbit 
+			  					generic map(borda => '1')
+								port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));                    
         end generate;
                    
    end generate g1;   
     
 
-    R1 <= RD when adRd = AdRs else
-	 		 reg(CONV_INTEGER(AdRs));    -- source1 selection 
+    R1 <= reg(CONV_INTEGER(AdRs));    -- source1 selection 
 
-    R2 <= RD when AdRt = adRd else 
-	  		reg(CONV_INTEGER(AdRt));    -- source2 selection 
+    R2 <= reg(CONV_INTEGER(AdRt));    -- source2 selection 
    
 end reg_bank;
 
@@ -432,9 +434,9 @@ begin
 end arq_div;
 
 
---++++++++++++++++++++++++++
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- BI/DI
---++++++++++++++++++++++++++
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 library IEEE;
 use IEEE.Std_Logic_1164.all;
@@ -465,8 +467,8 @@ begin
 	
    RNPC: entity work.regnbit 
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
-   RIR: entity work.regnbit  
-               port map(ck=>ck, rst=>rst, ce=>en, D=>D_instruction, Q=>instruction);
+   --RIR: entity work.regnbit  
+      --         port map(ck=>ck, rst=>rst, ce=>en, D=>D_instruction, Q=>instruction);
 	process(ck, rst)
 		begin
 		if rst = '1' then
@@ -477,19 +479,22 @@ begin
 			ext <= (others => '0');
 		elsif ck'event and ck = '0' then
 			if en = '1' then				
-				ir <= instruction;
-				rs <= instruction(25 downto 21);
-				rt <= instruction(20 downto 16);
-				rd <= instruction(15 downto 11);
-				ext <= instruction(15 downto 0);
+				-- correcao temporario do glitch que demorava um borda para alterar os valores a baixo.
+				-- esse erro é por causa que quando o reg RIR é alterado de valor o instruction possui 
+				-- o valor anterior sendo assim a instrucao demorava um ciclo
+				ir <= D_instruction;--instruction;
+				rs <= D_instruction(25 downto 21);--instruction(25 downto 21);
+				rt <= D_instruction(20 downto 16);--instruction(20 downto 16);
+				rd <= D_instruction(15 downto 11);--instruction(15 downto 11);
+				ext <= D_instruction(15 downto 0); --instruction(15 downto 0);
 			end if;
 		end if;
 	end process;
 end arq_BI_DI;
 
---++++++++++++++++++++++++++++++++
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- DI_EX
---++++++++++++++++++++++++++++++++
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 library IEEE;
 use IEEE.Std_Logic_1164.all;
@@ -568,9 +573,9 @@ end process;
 
 end arq_DI_EX;
 
----------
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- EX_MEM
---------
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
 use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
@@ -613,6 +618,9 @@ begin
     begin
          if rst = '1' then
             rd <= (others => '0');
+				uins_MEM.ce <= '0';
+	         uins_MEM.rw <= '1'; 
+	         uins_MEM.bw <= '1';
          elsif ck'event and ck = '0' then
             if en = '1' then
                uins_Mem <= in_uins;
@@ -623,9 +631,9 @@ begin
 
 end arq_EX_MEM;
 
-------
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- Mem_ER
--------
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
 use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
@@ -787,7 +795,7 @@ begin
    ext_zero <= x"0000" & ext;
    --==============================================================================
    
-   -- Barreira DI_EX -- nao modifiquei ainda.
+   -- Barreira DI_EX 
 	Di_Ex : entity work.DI_EX  
 			 	   port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, 
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
