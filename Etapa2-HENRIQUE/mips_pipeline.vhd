@@ -38,13 +38,29 @@ package p_MRstd is
             rw:         std_logic;
             bw:         std_logic;       -- Byte-word control (mem write only)
             inst_grupo1: std_logic;
-				inst_branch: std_logic;
-				inst_grupoI: std_logic;       
+            inst_branch: std_logic;
+            inst_grupoI: std_logic;       
             RegDst:     std_logic;  
             i:          inst_type;       -- operation specification
             ini_mult:   std_logic;      -- sinal de controle para incio mult
             ini_div:    std_logic;      --sinal de controle para incio divi
    end record;
+
+-- constatnte para gerar valor inicial nas barreira
+-- valores iniciais para escrever valor da memoria de dados (rw,bw,ce)
+   constant C_incio : microinstruction := (
+      wreg => '0',
+      ce => '0',      
+      rw =>'1', 
+      bw => '1', 
+      inst_grupo1 => '0',
+      inst_branch => '0',
+      inst_grupoI =>'0',       
+      RegDst     => '0',  
+      i          => NOP,       
+      ini_mult => '0',      
+      ini_div => '0'
+      );
 
 end p_MRstd;
 
@@ -57,7 +73,7 @@ use IEEE.std_logic_1164.all;
 
 entity regnbit is
            generic( INIT_VALUE : STD_LOGIC_VECTOR(31 downto 0) := (others=>'0');
-			   		  borda : std_logic := '0' );
+                    borda : std_logic := '0' );
            port(  ck, rst, ce : in std_logic;
                   D : in  STD_LOGIC_VECTOR (31 downto 0);
                   Q : out STD_LOGIC_VECTOR (31 downto 0)
@@ -113,14 +129,14 @@ begin
 		-- assigned by the MIPS simulator!!
         g2: if i=29 generate -- SP ---  x10010000 + x800 -- top of stack
            r29: entity work.regnbit 
-			  					generic map(INIT_VALUE=>x"10010800", borda=>'1')    
+                        generic map(INIT_VALUE=>x"10010800", borda=>'1')    
                         port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));
         end generate;  
                 
         g3: if i/=29 generate 
            rx: entity work.regnbit 
-			  					generic map(borda => '1')
-								port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));                    
+                        generic map(borda => '1')
+                        port map(ck=>ck, rst=>rst, ce=>wen(i), D=>RD, Q=>reg(i));                    
         end generate;
                    
    end generate g1;   
@@ -150,9 +166,9 @@ use IEEE.std_logic_arith.all;
 use work.p_MRstd.all;
 
 entity alu is
-       port( op1, op2 : 	in std_logic_vector(31 downto 0);
-             outalu :   	out std_logic_vector(31 downto 0);   
-             op_alu :			in inst_type   
+       port( op1, op2 :    in std_logic_vector(31 downto 0);
+             outalu :      out std_logic_vector(31 downto 0);   
+             op_alu :      in inst_type   
            );
 end alu;
 
@@ -173,7 +189,7 @@ begin
         (0=>menorU, others=>'0')                 when  op_alu=SLTU  or op_alu=SLTIU    else   -- signed
         (0=>menorS, others=>'0')                 when  op_alu=SLT   or op_alu=SLTI     else   -- unsigned
         op1(31 downto 28) & op2(27 downto 0)     when  op_alu=J     or op_alu=JAL      else 
-        op1                                      when  op_alu=JR    or op_alu=JALR     else 
+        op2                                      when  op_alu=JR    or op_alu=JALR     else 
         to_StdLogicVector(to_bitvector(op1) sll  CONV_INTEGER(op2(10 downto 6)))   when  op_alu=SSLL   else 
         to_StdLogicVector(to_bitvector(op2) sll  CONV_INTEGER(op1(5 downto 0)))    when  op_alu=SLLV   else 
         to_StdLogicVector(to_bitvector(op1) sra  CONV_INTEGER(op2(10 downto 6)))   when  op_alu=SSRA   else 
@@ -209,7 +225,7 @@ end alu;
 --       00010 10001  >> desloca
 --
 -- 3     00111 10001  reg_Lo = 1 entao op2 eh somado ao reg_Hi
---       00011 11000  >> desloca
+--       00011 11000  >> desloca0
 --                  
 -- 4     00011 11000 reg_Lo = 0 nada altera
 --       00001 11100 >> desloca
@@ -224,89 +240,90 @@ use IEEE.STD_LOGIC_1164.all;
 use IEEE.STD_LOGIC_UNSIGNED.all;
 
 entity multiplica is
-	port (
-		ck        : in STD_LOGIC;
-		start     : in STD_LOGIC; 
-		op1       : in STD_LOGIC_VECTOR(31 downto 0); 
-		op2       : in STD_LOGIC_VECTOR(31 downto 0); 
-		end_mult  : out STD_LOGIC; 
-		P_Hi      : out STD_LOGIC_VECTOR(31 downto 0);
-		A_Lo      : out STD_LOGIC_VECTOR(31 downto 0) 
-	);
+   port (
+      ck        : in STD_LOGIC;
+      start     : in STD_LOGIC; 
+      op1       : in STD_LOGIC_VECTOR(31 downto 0); 
+      op2       : in STD_LOGIC_VECTOR(31 downto 0); 
+      end_mult  : out STD_LOGIC; 
+      P_Hi      : out STD_LOGIC_VECTOR(31 downto 0);
+      A_Lo      : out STD_LOGIC_VECTOR(31 downto 0)
+      );
 end multiplica;
 
 architecture arq_mult of multiplica is
  
-	type type_states is (Inicio, Soma, Desloca);
-	signal PS, NS : type_states;
+   type type_states is (Inicio, Soma, Desloca);
+   signal PS, NS : type_states;
 
-	signal reg_Hi : std_logic_vector(32 downto 0);
-	signal reg_Lo : std_logic_vector(31 downto 0);
-	signal cont : integer;
+   signal reg_Hi : std_logic_vector(32 downto 0);
+   signal reg_Lo, valor : std_logic_vector(31 downto 0);
+   signal cont : integer;
 begin
 	
-	process (ck)
-	begin
-		if ck'EVENT and ck = '1' then
-			PS <= NS;
-		end if;
-	end process;
+   process (ck)
+   begin
+      if ck'EVENT and ck = '1' then
+         PS <= NS;
+      end if;
+   end process;
 
    -- maquina de estados da multiplicacao
-	process (PS, start, cont)
-	begin
-		case PS is
-			when Inicio => 
-				if start = '1' then -- quando sinal de start eh ativo a maquina passa para o estado de soma
-					NS <= Soma;
-				else
-					NS <= Inicio;
-				end if;
+   process (PS, start, cont)
+   begin
+      case PS is
+         when Inicio => 
+            if start = '1' then -- quando sinal de start eh ativo a maquina passa para o estado de soma
+               NS <= Soma;
+            else
+               NS <= Inicio;
+            end if;
 
-			when Soma => 
-				NS <= Desloca;
-			
-			when Desloca => 
-				if (cont = 32) then
-					NS <= Inicio;
-				else
-					NS <= Soma;
-				end if;
+         when Soma => 
+            NS <= Desloca;
+            
+         when Desloca => 
+            if (cont = 32) then
+               NS <= Inicio;
+            else
+               NS <= Soma;
+            end if;
+            
+      end case; 
+   end process;
 
-		end case; 
-	end process;
+   process (ck, start) 
+   begin
+      if ck'event and ck = '1' then
+         case PS is
+            when Inicio => 
+               if start = '1' then            -- inicia os signal quando o start for ativado
+                  reg_Hi <= (others => '0');  -- zera o Hi
+                  reg_Lo <= op1;
+                  valor <= op2; 				
+                  cont <= 0;                 -- conta ate 32 quando chegar no 32 acaba o somador
+               end if;
+               end_mult <= '0';
 
-	process (ck, start) 
-	begin
-		if ck'event and ck = '1' then
-			case PS is
-				when Inicio => 
-					if start = '1' then            -- inicia os signal quando o start for ativado
-						reg_Hi <= (others => '0');  -- zera o Hi
-						reg_Lo <= op1; 				
-						cont <= 0;                 -- conta ate 32 quando chegar no 32 acaba o somador
-					end if;
-					end_mult <= '0';
+            when Soma => 	
+               if reg_Lo(0) = '1' then        -- se o primeiro bit do reg Lo for 1 devese somar o valor de op2 no reg Hi
+                  reg_Hi <= reg_Hi + ('0' & valor);
+               end if;
+               cont <= cont + 1;              -- incrementa o cont
 
-				when Soma => 	
-					if reg_Lo(0) = '1' then        -- se o primeiro bit do reg Lo for 1 devese somar o valor de op2 no reg Hi
-						reg_Hi <= reg_Hi + ('0' & op2);
-					end if;
-					cont <= cont + 1;              -- incrementa o cont
+            when Desloca => 
+               if cont = 32 then              -- quando cont for igual a 32 a multiplicacao deve acabar
+                  end_mult <= '1';
+               end if;
+               reg_Hi <= '0' & reg_Hi (32 downto 1);            -- desloca para a direita uma casa
+               reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); 	    -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
 
-				when Desloca => 
-					if cont = 32 then              -- quando cont for igual a 32 a multiplicacao deve acabar
-						end_mult <= '1';
-					end if;
-					reg_Hi <= '0' & reg_Hi (32 downto 1);            -- desloca para a direita uma casa
-					reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); 	    -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
-
-			end case;
-		end if;
-	end process;
+         end case;
+      end if;
+   end process;
 	 
-	P_Hi <= reg_Hi(31 downto 0);					-- a parte do Reg_Hi vai para saida P_Hi
-	A_Lo <= reg_Lo;									-- a parte do Reg_Lo contem o resultado da multiplicacao e vai para a saida A_Lo
+   P_Hi <= reg_Hi(31 downto 0);              -- a parte do Reg_Hi vai para saida P_Hi
+   A_Lo <= reg_Lo;                           -- a parte do Reg_Lo contem o resultado da multiplicacao e vai para a saida A_Lo
 
 end arq_mult;
 
@@ -356,80 +373,79 @@ entity divide is
 end divide;
 
 architecture arq_div of divide is   
-		type State_type is (inicio, desloca, subtrai, termina);
-		signal PS, NS: State_type;
+      type State_type is (inicio, desloca, subtrai, termina);
+      signal PS, NS: State_type;
 
-		signal reg_Hi         :	std_logic_vector(32 downto 0);
-		signal reg_Lo         :	std_logic_vector(31 downto 0);
-		signal diferenca      :	std_logic_vector(32 downto 0);
-		signal cont           :	integer;
+      signal reg_Hi         : std_logic_vector(32 downto 0);
+      signal reg_Lo, valor         : std_logic_vector(31 downto 0);
+      signal diferenca      : std_logic_vector(32 downto 0);
+      signal cont           : integer;
 begin
 
    process(start, ck)
    begin    
-     if PS= inicio and start='1' then       -- inicia os signal quando o start for ativado
-         reg_Hi 	<= (others=>'0');      
-         reg_Lo 	<= op1;
+      if PS= inicio and start='1' then       -- inicia os signal quando o start for ativado
+         reg_Hi   <= (others=>'0');      
+         reg_Lo   <= op1;
+         valor    <= op2;
          cont     <= 0;                  -- contador de 1 ate 31
 
-     elsif ck'event and ck='1' then 
+      elsif ck'event and ck='1' then 
      
-            if PS=desloca then  
-                reg_Hi <= reg_Hi (31 downto 0) & reg_Lo (31);
-                reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32); 
+         if PS=desloca then  
+            reg_Hi <= reg_Hi (31 downto 0) & reg_Lo (31);
+            reg_Lo <= reg_Lo (30 downto 0) & reg_Hi (32); 
 
-            elsif PS=subtrai then  
-                if diferenca(32)='1' then  
-                      reg_Lo(0)<='0';
-                else
-                      reg_Lo(0)<='1';
-                      reg_Hi <= diferenca;
-                end if;
-                
-                cont <= cont + 1;                      
+         elsif PS=subtrai then  
+            if diferenca(32)='1' then  
+               reg_Lo(0)<='0';
+            else
+               reg_Lo(0)<='1';
+               reg_Hi <= diferenca;
             end if;
-        end if;       
-    end process;
+            
+            cont <= cont + 1;                      
+         end if;
+      end if;       
+   end process;
     
-    diferenca <= reg_Hi - ('0' & op2);    
-    resto   <= reg_Hi(31 downto 0);
-    divisao <= reg_Lo;     
-    end_div  <= '1' when PS=termina else '0';
+   diferenca <= reg_Hi - ('0' & valor);    
+   resto     <= reg_Hi(31 downto 0);
+   divisao   <= reg_Lo;     
+   end_div   <= '1' when PS=termina else '0';
    
- 	process (ck)
-    begin
-    		if ck'event and ck='1' then  
-                PS <= NS;
-      	end if;
-   	end process;
+   process (ck)
+   begin
+      if ck'event and ck='1' then  
+         PS <= NS;
+      end if;
+   end process;
 
     -- maquina de estados da divisao
-  	process (start, PS, cont)
-  	begin
-		   case PS is
-		      when inicio   =>  
-    				if start='1' then  
-    						NS <= desloca;  
-    				else   
-    						NS <= inicio;   
-    				end if;
-		     
-          when desloca  =>  
-		      			NS <= subtrai;
-		     
-          when subtrai  =>  
-		      	 if cont=31 then 
-                NS <= termina; 
-             else 
-                NS <= desloca;  
+   process (start, PS, cont)
+   begin
+      case PS is
+         when inicio   =>  
+            if start='1' then  
+               NS <= desloca;  
+            else   
+               NS <= inicio;   
             end if;
-		     
-          when termina 	=>   
-	      				NS <= inicio;
-		   end case; 
-   	end process;
 
+         when desloca  =>  
+            NS <= subtrai;
 
+         when subtrai  =>  
+            if cont=31 then 
+               NS <= termina; 
+            else 
+               NS <= desloca;  
+            end if;
+
+         when termina 	=>   
+            NS <= inicio;
+      end case; 
+   end process;
 
 end arq_div;
 
@@ -448,7 +464,8 @@ entity BI_DI is
       port(  ck, rst :              in std_logic;
              D_incpc :              in std_logic_vector(31 downto 0);
              D_instruction :        in std_logic_vector(31 downto 0);
-             npc :                  out std_logic_vector(31 downto 0);
+             
+             npc :              	   out std_logic_vector(31 downto 0);
              ir :                   out std_logic_vector(31 downto 0);
              rs :                   out std_logic_vector(4 downto 0);
              rt :                   out std_logic_vector(4 downto 0);
@@ -458,38 +475,32 @@ entity BI_DI is
 end BI_DI;
 
 architecture arq_BI_DI of BI_DI is
-
-   signal en : std_logic;
-   signal instruction : std_logic_vector (31 downto 0);
+   signal en : std_logic := '1';
 
 begin
    en <= '1';
 	
    RNPC: entity work.regnbit 
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
-   --RIR: entity work.regnbit  
-      --         port map(ck=>ck, rst=>rst, ce=>en, D=>D_instruction, Q=>instruction);
-	process(ck, rst)
-		begin
-		if rst = '1' then
-			ir <= (others => '0');
-			rs <= (others => '0');
-			rd <= (others => '0');
-			rt <= (others => '0');
-			ext <= (others => '0');
-		elsif ck'event and ck = '0' then
-			if en = '1' then				
-				-- correcao temporario do glitch que demorava um borda para alterar os valores a baixo.
-				-- esse erro é por causa que quando o reg RIR é alterado de valor o instruction possui 
-				-- o valor anterior sendo assim a instrucao demorava um ciclo
-				ir <= D_instruction;--instruction;
-				rs <= D_instruction(25 downto 21);--instruction(25 downto 21);
-				rt <= D_instruction(20 downto 16);--instruction(20 downto 16);
-				rd <= D_instruction(15 downto 11);--instruction(15 downto 11);
-				ext <= D_instruction(15 downto 0); --instruction(15 downto 0);
-			end if;
-		end if;
-	end process;
+   
+   process(ck, rst)
+   begin
+      if rst = '1' then
+         ir <= (others => '0');
+         rs <= (others => '0');
+         rd <= (others => '0');
+         rt <= (others => '0');
+         ext <= (others => '0');
+      elsif ck'event and ck = '0' then
+         if en = '1' then				
+            ir <= D_instruction;
+            rs <= D_instruction(25 downto 21);
+            rt <= D_instruction(20 downto 16);
+            rd <= D_instruction(15 downto 11);
+            ext <= D_instruction(15 downto 0);
+         end if;
+      end if;
+   end process;
 end arq_BI_DI;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -530,7 +541,7 @@ end DI_EX;
 
 architecture arq_DI_EX of DI_EX is
 	
-	signal en : std_logic;
+   signal en : std_logic := '1';
 begin
    en <= '1';
 	
@@ -562,6 +573,7 @@ begin
          if rst = '1' then
             rd <= (others => '0');
             rt <= (others => '0');
+            uins_EX <= C_incio;
          elsif ck'event and ck = '0' then
              if en = '1' then
                uins_EX <= in_uins;
@@ -600,7 +612,7 @@ end EX_MEM;
 
 architecture arq_EX_MEM of EX_MEM is
 	
-	signal en : std_logic;
+   signal en : std_logic := '1';
 begin
    en <= '1';
 	
@@ -612,15 +624,12 @@ begin
 	
    REG_EscMem:  entity work.regnbit 
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_EscMem, Q=>EscMem);
-
 					
    process(ck, rst)
     begin
          if rst = '1' then
             rd <= (others => '0');
-				uins_MEM.ce <= '0';
-	         uins_MEM.rw <= '1'; 
-	         uins_MEM.bw <= '1';
+            uins_Mem <= C_incio;
          elsif ck'event and ck = '0' then
             if en = '1' then
                uins_Mem <= in_uins;
@@ -658,7 +667,7 @@ end Mem_ER;
 
 architecture arq_Mem_ER of Mem_ER is
 	
-   signal en : std_logic;
+   signal en : std_logic := '1';
 begin
    en <= '1';
 	
@@ -676,6 +685,7 @@ begin
       begin
          if rst = '1' then
             rd <= (others => '0');
+            uins_ER <= C_incio;
          elsif ck'event and ck = '0' then
             if en = '1' then
                uins_ER <= in_uins;
@@ -704,7 +714,7 @@ entity datapath is
              d_address :            out std_logic_vector(31 downto 0);
              data :                 inout std_logic_vector(31 downto 0);  
              uins :                 in microinstruction;
-				 uins_MEM_out :             out microinstruction;
+             uins_MEM_out :             out microinstruction;
              end_mult, end_div	:  out std_logic;
              IR_OUT :               out std_logic_vector(31 downto 0)
           );
@@ -752,27 +762,27 @@ begin
    --==============================================================================
    --==============================================================================
    -- first_stage = BI
-	-- primeiro estagio deve buscar uma nova instrução a cada borda do clock
+   -- primeiro estagio deve buscar uma nova instrução a cada borda do clock
    --==============================================================================
    --==============================================================================
   
    incpc <= pc + 4; -- incrementa o pc 
 	  
-	dtpc <= outalu when jump = '1' else incpc; 
+   dtpc <= outalu when jump = '1' else incpc; 
    
    -- Code memory starting address: beware of the OFFSET! 
    -- The one below (x"00400000") serves for code generated 
    -- by the MARS simulator
-   rpc: entity work.regnbit generic map(INIT_VALUE=>x"00400000")   
- 								  port map(ck=>ck, rst=>rst, ce=>'1', D=>dtpc, Q=>pc); -- reg PC
+   rpc: entity work.regnbit 
+         generic map(INIT_VALUE=>x"00400000")   
+         port map(ck=>ck, rst=>rst, ce=>'1', D=>dtpc, Q=>pc); -- reg PC
   
    i_address <= pc;  -- connects PC output to the instruction memory address bus
            
-	-- barreira BI/DI
-	Bi_Di : entity work.BI_DI
-					port map(
-					ck => ck, rst => rst, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
-					ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
+   -- barreira BI/DI
+   Bi_Di : entity work.BI_DI
+            port map(ck => ck, rst => rst, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
+                     ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
    
    --==============================================================================
    --==============================================================================
@@ -780,8 +790,8 @@ begin
    --==============================================================================
    --==============================================================================
    
-	IR_OUT <= ir; -- decodifica a instrução
-	       
+   IR_OUT <= ir; -- decodifica a instrução
+         
    REGS: entity work.reg_bank(reg_bank) 
                port map ( ck=>ck, rst=>rst, wreg=>uins_ER.wreg, AdRs=>adRS_DI, 
                           AdRt=>adRT_DI, adRD=>adRD_ER, Rd=>RIN, R1=>R1, R2=>R2); 
@@ -790,14 +800,14 @@ begin
    -- extençao de sinais para uso de Immediate
    ext16    <=  x"FFFF" & ext when ext(15)='1' else
                 x"0000" & ext;
-	shift2   <= ext16(29 downto 0)  & "00";			 
+   shift2   <= ext16(29 downto 0)  & "00";			 
    aD_jump  <= "0000" & ir(25 downto 0) & "00";
    ext_zero <= x"0000" & ext;
    --==============================================================================
    
    -- Barreira DI_EX 
-	Di_Ex : entity work.DI_EX  
-			 	   port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, 
+   Di_Ex : entity work.DI_EX  
+              port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, 
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
                         D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,  
                         D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA, 
@@ -813,7 +823,7 @@ begin
 	
    --==============================================================================
    -- Immediate constant
-	IMED <= shift2_EX   when uins_EX.inst_branch='1' else
+   IMED <= shift2_EX   when uins_EX.inst_branch='1' else
            aD_jump_EX  when uins_EX.i=J or uins_EX.i=JAL else 
            ext_zero_EX when uins_EX.i=ANDI or uins_EX.i=ORI  or uins_EX.i=XORI else
            ext16_EX;
@@ -821,25 +831,25 @@ begin
    
    --==============================================================================
    -- MUX endereco registrador destino   
-	adRD <= "11111" when uins_EX.i=JAL else -- endereco $RA
-	   	  adRD_EX when uins_EX.RegDst = '1' else -- instruçao tipo R e sll sllv ...
-			  adRT_EX;
+   adRD <= "11111" when uins_EX.i=JAL else -- endereco $RA
+           adRD_EX when uins_EX.RegDst = '1' else -- instruçao tipo R e sll sllv ...
+           adRT_EX;
 	--==============================================================================
    
    --==============================================================================
    -- MUX para levar o valor que vai ser assumido no op1 da ula   
    RA_inst <= RB when uins_EX.i=SSLL or uins_EX.i=SSRA or uins_EX.i=SSRL else 
               RA;            
-				  
+              
    op1 <= npc_EX  when uins_EX.inst_branch = '1' else 
-          RA_inst; 
+          RA_inst;
    --==============================================================================  
    
    --==============================================================================
    -- mux para gerar o segundo operando da ULA
    op2 <= RB when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR 
-                  or uins_EX.i=SLLV or uins_EX.i=SRAV or uins_EX.i=SRLV else 
-          IMED;        
+                                            or uins_EX.i=SLLV or uins_EX.i=SRAV or uins_EX.i=SRLV else 
+          IMED;
    --==============================================================================
                                   
    -- ALU instantiation
@@ -848,7 +858,7 @@ begin
    
    --==============================================================================
    -- mux saida da outalu                                
-	RALU <=  Hi when uins_EX.i=MFHI else                -- para executar a instrucao MFHi e MFLo foram acresentadas
+   RALU <=  Hi when uins_EX.i=MFHI else                -- para executar a instrucao MFHi e MFLo foram acresentadas
             Lo when uins_EX.i=MFLO else
             outalu; 
    --==============================================================================
@@ -868,7 +878,7 @@ begin
    -- multiplicador
    inst_mult: entity work.multiplica 
                 port map (ck=>ck, start=>uins_EX.ini_mult, op1=>RA, op2=>RB, 
-					 				end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
+                          end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
    end_mult <=	end_mult_en;   -- sinal de saida da datapath para o control_unit do mult
    --==============================================================================
    
@@ -876,7 +886,7 @@ begin
    -- divisor
    inst_div: entity work.divide 
                 port map (ck=>ck, start=>uins_EX.ini_div, op1=>RA, op2=>RB, 
-					 				end_div=>end_div_en, resto=>resto, divisao=>quociente);
+                          end_div=>end_div_en, resto=>resto, divisao=>quociente);
    end_div  <= end_div_en;    -- sinal de saida da datapath para o control_unit do div
    --==============================================================================
    
@@ -891,7 +901,7 @@ begin
    D_Hi <= mult_Hi when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Hi
            resto; 
    REG_HI: entity work.regnbit  
-  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);
+            port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);
    --==============================================================================
    
    --==============================================================================
@@ -899,14 +909,13 @@ begin
    D_Lo <= mult_Lo when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Lo
            quociente; 
    REG_LO: entity work.regnbit  
-  				port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);  
+            port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);  
 	--==============================================================================
 	
    Ex_Mem : entity work.EX_MEM
-			 	   port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => RALU,
-  				 		D_EscMem => RB, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM, 
-                  RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);	
-						    
+         port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => RALU,
+                   D_EscMem => RB, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM, 
+                   RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);
    --==============================================================================
    --==============================================================================
    -- fourth stage
@@ -921,7 +930,7 @@ begin
 	
    --==============================================================================
    -- tristate to control memory write    
-   data <= EscMem when (uins_MEM.ce='1' and uins_MEM.rw='0') else (others=>'Z');  
+   data <= EscMem when (uins_MEM.ce='1' and uins_MEM.rw='0') else (others=>'Z') after 1 ns;
    --==============================================================================
 
    --==============================================================================
@@ -931,10 +940,10 @@ begin
    --==============================================================================
 	
    Mem_ER : entity work.Mem_ER
-			 	   port map( ck => ck, rst => rst, in_uins => uins_MEM, D_RALU => RALU_MEM,
-  				 				 D_MDR => mdr_int, D_rd => adRD_MEM, D_npc => npc_MEM,
+               port map( ck => ck, rst => rst, in_uins => uins_MEM, D_RALU => RALU_MEM,
+                         D_MDR => mdr_int, D_rd => adRD_MEM, D_npc => npc_MEM,
                          uins_ER => uins_ER, RALU_ER => result, npc => npc_ER,
-  				 	 			 MDR => MDR, rd => adRD_ER);				
+                         MDR => MDR, rd => adRD_ER);
                                                
    --==============================================================================
    --==============================================================================
@@ -942,13 +951,11 @@ begin
    --==============================================================================
    --==============================================================================
 
-   
 	-- signal to be written into the register bank
- 	RIN <= npc_ER when (uins_ER.i=JALR or uins_ER.i=JAL) else 
-			 MDR  when uins_ER.i=LW  or uins_ER.i=LBU else
-			 result;
-
-
+   RIN <= npc_ER when (uins_ER.i=JALR or uins_ER.i=JAL) else 
+          MDR    when uins_ER.i=LW  or uins_ER.i=LBU else
+          result;
+          
 end datapath;
 
 --------------------------------------------------------------------------
@@ -972,14 +979,14 @@ architecture control_unit of control_unit is
    type type_state is (Sidle, Sfetch, Sreg, Salu, Swbk, Sld, Sst, Ssalta);
    signal PS, NS : type_state;
    signal i : inst_type;  
-	signal inst_grupo11, inst_branchh, inst_grupoII: std_logic;
+   signal inst_grupo11, inst_branchh, inst_grupoII: std_logic;
 begin
       
     ----------------------------------------------------------------------------------------
     -- BLOCK (1/3) - INSTRUCTION DECODING and ALU operation definition.
     -- This block generates 1 Output Function of the Control Unit
     ----------------------------------------------------------------------------------------
-    i <=   NOP		when ir(31 downto 0)=x"00000000" else
+    i <=   NOP    when ir(31 downto 0)=x"00000000" else
            ADDU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100001" else
            SUBU   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100011" else
            AAND   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000100100" else
@@ -992,7 +999,7 @@ begin
            SRAV   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000000111" else
            SSRL   when ir(31 downto 21)="00000000000" and ir(5 downto 0)="000010" else
            SRLV   when ir(31 downto 26)="000000" and ir(10 downto 0)="00000000110" else  
-			  ADDIU  when ir(31 downto 26)="001001" else
+           ADDIU  when ir(31 downto 26)="001001" else
            ANDI   when ir(31 downto 26)="001100" else
            ORI    when ir(31 downto 26)="001101" else
            XORI   when ir(31 downto 26)="001110" else
@@ -1029,30 +1036,30 @@ begin
     ----------------------------------------------------------------------------------------
     -- BLOCK (2/3) - DATAPATH REGISTERS load control signals generation.
     ----------------------------------------------------------------------------------------	
-	 inst_branchh  <= '1' when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else 
-                   '0';
+    inst_branchh  <= '1' when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else 
+                     '0';
                    
     inst_grupo11  <= '1' when i=ADDU or i=SUBU or i=AAND
                           or i=OOR or i=XXOR or i=NNOR else
-                    '0';
+                     '0';
  
     inst_grupoII  <= '1' when i=ADDIU or i=ANDI or i=ORI or i=XORI else
-                    '0';
+                     '0';
   	
-	uins.inst_branch <= inst_branchh;
- 	uins.inst_grupo1 <= inst_grupo11;
- 	uins.inst_grupoI <= inst_grupoII;
+   uins.inst_branch <= inst_branchh;
+   uins.inst_grupo1 <= inst_grupo11;
+   uins.inst_grupoI <= inst_grupoII;
 	
-	 uins.RegDst <= '1' when inst_grupo11='1' or i=SLTU or i=SLT
-														  or i=JALR  
-						                          or i=SSLL or i=SLLV
-						                          or i=SSRA or i=SRAV
-						                          or i=SSRL or i=SRLV
-						                          or i=MFHI or i=MFLO else 
-						'0';
+   uins.RegDst <= '1' when inst_grupo11='1' or i=SLTU or i=SLT
+                                            or i=JALR  
+                                            or i=SSLL or i=SLLV
+                                            or i=SSRA or i=SRAV
+                                            or i=SSRL or i=SRLV
+                                            or i=MFHI or i=MFLO else 
+                  '0';
 
     uins.wreg   <= '0' when (inst_branchh = '1' or (i=J or i=JR) or
-	 	  							 i = NOP or (i=SW or i=SB) or i=MULTU or i=DIVU) else  '1'; -- nop nao escreve nos banco de registrador 
+                             i = NOP or (i=SW or i=SB) or i=MULTU or i=DIVU) else  '1'; -- nop nao escreve nos banco de registrador 
    
     uins.rw    <= '0' when i=SB or i=SW else  '1';
                   
