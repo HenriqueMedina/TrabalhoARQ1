@@ -456,8 +456,6 @@ end arq_div;
 
 library IEEE;
 use IEEE.Std_Logic_1164.all;
-use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
-use IEEE.Std_Logic_arith.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
    
 entity BI_DI is
@@ -509,8 +507,6 @@ end arq_BI_DI;
 
 library IEEE;
 use IEEE.Std_Logic_1164.all;
-use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
-use IEEE.Std_Logic_arith.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
    
 entity DI_EX is
@@ -590,8 +586,6 @@ end arq_DI_EX;
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
-use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
-use IEEE.Std_Logic_arith.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
    
 entity EX_MEM is
@@ -645,8 +639,6 @@ end arq_EX_MEM;
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
-use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
-use IEEE.Std_Logic_arith.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
    
 entity Mem_ER is
@@ -714,8 +706,7 @@ entity datapath is
              d_address :            out std_logic_vector(31 downto 0);
              data :                 inout std_logic_vector(31 downto 0);  
              uins :                 in microinstruction;
-             uins_MEM_out :             out microinstruction;
-             end_mult, end_div	:  out std_logic;
+             uins_MEM_out :         out microinstruction;
              IR_OUT :               out std_logic_vector(31 downto 0)
           );
 end datapath;
@@ -879,7 +870,6 @@ begin
    inst_mult: entity work.multiplica 
                 port map (ck=>ck, start=>uins_EX.ini_mult, op1=>RA, op2=>RB, 
                           end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
-   end_mult <=	end_mult_en;   -- sinal de saida da datapath para o control_unit do mult
    --==============================================================================
    
    --==============================================================================
@@ -887,7 +877,6 @@ begin
    inst_div: entity work.divide 
                 port map (ck=>ck, start=>uins_EX.ini_div, op1=>RA, op2=>RB, 
                           end_div=>end_div_en, resto=>resto, divisao=>quociente);
-   end_div  <= end_div_en;    -- sinal de saida da datapath para o control_unit do div
    --==============================================================================
    
    --==============================================================================
@@ -918,7 +907,7 @@ begin
                    RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);
    --==============================================================================
    --==============================================================================
-   -- fourth stage
+   -- fourth stage = MEM
    --==============================================================================
    --==============================================================================
    
@@ -947,7 +936,7 @@ begin
                                                
    --==============================================================================
    --==============================================================================
-   -- fifth stage
+   -- fifth stage = ER
    --==============================================================================
    --==============================================================================
 
@@ -970,7 +959,6 @@ use work.p_MRstd.all;
 entity control_unit is
         port(   ck, rst : in std_logic;          
                 uins : out microinstruction;
-                end_mult, end_div : in std_logic;
                 ir : in std_logic_vector(31 downto 0)
              );
 end control_unit;
@@ -983,7 +971,7 @@ architecture control_unit of control_unit is
 begin
       
     ----------------------------------------------------------------------------------------
-    -- BLOCK (1/3) - INSTRUCTION DECODING and ALU operation definition.
+    -- INSTRUCTION DECODING and ALU operation definition.
     -- This block generates 1 Output Function of the Control Unit
     ----------------------------------------------------------------------------------------
     i <=   NOP    when ir(31 downto 0)=x"00000000" else
@@ -1034,17 +1022,17 @@ begin
     uins.i <= i;    -- this instructs the alu to execute its expected operation, if any
 
     ----------------------------------------------------------------------------------------
-    -- BLOCK (2/3) - DATAPATH REGISTERS load control signals generation.
+    -- DATAPATH REGISTERS load control signals generation.
     ----------------------------------------------------------------------------------------	
-    inst_branchh  <= '1' when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else 
-                     '0';
+   inst_branchh  <= '1' when i=BEQ or i=BGEZ or i=BLEZ or i=BNE else 
+                    '0';
                    
-    inst_grupo11  <= '1' when i=ADDU or i=SUBU or i=AAND
+   inst_grupo11  <= '1' when i=ADDU or i=SUBU or i=AAND
                           or i=OOR or i=XXOR or i=NNOR else
-                     '0';
+                    '0';
  
-    inst_grupoII  <= '1' when i=ADDIU or i=ANDI or i=ORI or i=XORI else
-                     '0';
+   inst_grupoII  <= '1' when i=ADDIU or i=ANDI or i=ORI or i=XORI else
+                    '0';
   	
    uins.inst_branch <= inst_branchh;
    uins.inst_grupo1 <= inst_grupo11;
@@ -1091,15 +1079,13 @@ end MRstd;
 architecture MRstd of MRstd is
       signal IR: std_logic_vector(31 downto 0);
       signal uins, uins_MEM: microinstruction;
-      signal end_mult, end_div : std_logic;
  begin
 
      dp: entity work.datapath   
          port map( ck=>clock, rst=>reset, IR_OUT=>IR, uins=>uins, uins_MEM_out=> uins_MEM, i_address=>i_address, 
-                   instruction=>instruction, d_address=>d_address,  data=>data,
-                   end_mult=>end_mult, end_div=>end_div);
+                   instruction=>instruction, d_address=>d_address,  data=>data);
 
-     ct: entity work.control_unit port map( ck=>clock, rst=>reset, IR=>IR, end_mult => end_mult, end_div => end_div, uins=>uins);
+     ct: entity work.control_unit port map( ck=>clock, rst=>reset, IR=>IR, uins=>uins);
          
      ce <= uins_MEM.ce;
      rw <= uins_MEM.rw; 
