@@ -881,13 +881,12 @@ begin
    
    --==============================================================================
    -- habilita escrita no registrador Hi e LO
-   Hi_Lo_en <= '1' when (((uins_EX.i=DIVU and end_div_en='1') or              -- signal para gerar um sinal de escrita no REG_Hi e REG_Lo
-                         (uins_EX.i=MULTU and end_mult_en='1'))) else '0'; 
+   Hi_Lo_en <= '1' when (end_div_en='1' or  end_mult_en='1') else '0';              -- signal para gerar um sinal de escrita no REG_Hi e REG_Lo
    --==============================================================================
    
    --==============================================================================
    -- Hi register
-   D_Hi <= mult_Hi when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Hi
+   D_Hi <= mult_Hi when end_mult_en='1' else    -- mux para saber de onde vem o valor do REG_Hi
            resto; 
    REG_HI: entity work.regnbit  
             port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Hi, Q=>Hi);
@@ -895,7 +894,7 @@ begin
    
    --==============================================================================
    -- Lo register               
-   D_Lo <= mult_Lo when uins_EX.i=MULTU else    -- mux para saber de onde vem o valor do REG_Lo
+   D_Lo <= mult_Lo when end_mult_en='1' else    -- mux para saber de onde vem o valor do REG_Lo
            quociente; 
    REG_LO: entity work.regnbit  
             port map(ck=>ck, rst=>rst, ce=>Hi_Lo_en, D=>D_Lo, Q=>Lo);  
