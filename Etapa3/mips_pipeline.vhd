@@ -461,6 +461,7 @@ use work.p_MRstd.all;
 entity BI_DI is
       port(  ck, rst :              in std_logic;
              D_incpc :              in std_logic_vector(31 downto 0);
+             en :                   in std_logic;
              D_instruction :        in std_logic_vector(31 downto 0);
              
              npc :              	   out std_logic_vector(31 downto 0);
@@ -473,10 +474,8 @@ entity BI_DI is
 end BI_DI;
 
 architecture arq_BI_DI of BI_DI is
-   signal en : std_logic := '1';
 
 begin
-   en <= '1';
 	
    RNPC: entity work.regnbit 
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
@@ -689,6 +688,87 @@ begin
 end arq_Mem_ER;
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- Hazard detection unit
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+library ieee;
+use IEEE.Std_Logic_1164.all;
+use work.p_MRstd.all;
+
+entity hazard_detection is
+  port (
+   clock, reset   : in std_logic;
+   di_ex          : in microinstruction;
+   rd             : in std_logic_vector(4 downto 0);
+   rs,rt          : in std_logic_vector(4 downto 0);
+   bolha          : out std_logic;
+   wpc, wbidi     : out std_logic
+  );
+end entity;
+
+architecture arch of hazard_detection is
+
+   signal stop : std_logic;
+
+begin
+   wpc   <= '0' when stop = '1' else '1';
+   wbidi <= '0' when stop = '1' else '1';
+   bolha <= '1' when stop = '1' else '0';
+   
+   if reset = '1' then
+      stop <= '0';
+   elsif clock'event and clock = '1' then -- pode não funcionar 
+      if (di_ex.ce = '1' and di_ex.rw = '0') and (rd = rs or rd = rt) then
+         stop <= '1';
+      else
+         stop <= '0';
+      end if;
+   end if;
+   
+end architecture;
+
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- Forwarding
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+library IEEE;
+use IEEE.Std_Logic_1164.all;
+use work.p_MRstd.all;
+
+entity Forwarding is
+  port (
+   clock,reset : in std_logic;
+   rd_mem, rd_er : in std_logic;
+   rs, rt : in std_logic;
+   uins_EX, uins_Mem, uins_ER : in microinstruction;
+   ForwardA, ForwardB : out std_logic;
+   
+  );
+end entity;
+
+architecture arch of Forwarding is
+   
+   signal opA, opB signal std_logic_vector (1 downto 0);
+
+begin
+   ForwardA <= '1' when opA = "01" or opA = "10" or opA = "00" else '0';
+   ForwardB <= '1' when opB = "01" or opB = "10" or opB = "00" else '0';
+
+   if reset = '1' then
+      opA <= "00";
+      opB <= "00";
+   elsif clock'event and clock = '1' then
+      if uins_EX.wreg = '1' and rd != 0 then
+         if rd_mem = rs then
+            opA = "10";
+         elsif rd_mem = rt then
+            opA = "01";
+         elsif 
+         end if;
+      end if;
+   end if;
+
+end architecture;
+
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 -- Datapath structural description
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -714,11 +794,14 @@ end datapath;
 architecture datapath of datapath is
    --==============================================================================
    -- signal usado no BI
+   signal wpc, wbidi std_logic;
    signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0'); 
    --==============================================================================
    
    --==============================================================================
    -- signal usados no DI
+   signal bolha : std_logic;
+   signal uins_DI : microinstruction;
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
    signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
    signal ext : std_logic_vector(15 downto 0) := (others => '0');
@@ -766,13 +849,13 @@ begin
    -- by the MARS simulator
    rpc: entity work.regnbit 
          generic map(INIT_VALUE=>x"00400000")   
-         port map(ck=>ck, rst=>rst, ce=>'1', D=>dtpc, Q=>pc); -- reg PC
+         port map(ck=>ck, rst=>rst, ce=>wpc, D=>dtpc, Q=>pc); -- reg PC
   
    i_address <= pc;  -- connects PC output to the instruction memory address bus
            
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
-            port map(ck => ck, rst => rst, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
+            port map(ck => ck, rst => rst, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
                      ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
    
    --==============================================================================
@@ -782,6 +865,13 @@ begin
    --==============================================================================
    
    IR_OUT <= ir; -- decodifica a instrução
+      
+   
+   -- Hazard detection unit
+   harzard_unit: entity work.hazard_detection 
+               port map ( ck=>ck, rst=>rst, di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
+               bolha => bolha ,wpc => wpc, wbidi => wbidi);    
+      
          
    REGS: entity work.reg_bank(reg_bank) 
                port map ( ck=>ck, rst=>rst, wreg=>uins_ER.wreg, AdRs=>adRS_DI, 
@@ -796,9 +886,14 @@ begin
    ext_zero <= x"0000" & ext;
    --==============================================================================
    
+   --==============================================================================
+   -- MUX da bolha 
+      uins_DI <= C_incio when bolha = '1' else uins;
+   --==============================================================================
+   
    -- Barreira DI_EX 
    Di_Ex : entity work.DI_EX  
-              port map( ck => ck, rst => rst, in_uins => uins, D_incpc => npc_DI, 
+              port map( ck => ck, rst => rst, in_uins => uins_DI, D_incpc => npc_DI, 
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
                         D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,  
                         D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA, 
