@@ -520,6 +520,7 @@ entity DI_EX is
             D_ext_zero :            in std_logic_vector(31 downto 0);
             D_rd :                  in std_logic_vector(4 downto 0);
             D_rt :                  in std_logic_vector(4 downto 0);
+            D_rs :                  in std_logic_vector(4 downto 0);
 
             uins_EX :               out microinstruction;
             npc :                   out std_logic_vector(31 downto 0);
@@ -530,7 +531,8 @@ entity DI_EX is
             Q_aD_jump :             out std_logic_vector(31 downto 0);
             Q_ext_zero :            out std_logic_vector(31 downto 0);
             rd :                    out std_logic_vector(4 downto 0);
-            rt :                    out std_logic_vector(4 downto 0)
+            rt :                    out std_logic_vector(4 downto 0);
+            rs :                    out std_logic_vector(4 downto 0)
           );
 end DI_EX;
 
@@ -568,12 +570,14 @@ begin
          if rst = '1' then
             rd <= (others => '0');
             rt <= (others => '0');
+            rs <= (others => '0');
             uins_EX <= C_incio;
          elsif ck'event and ck = '0' then
              if en = '1' then
                uins_EX <= in_uins;
                rd <= D_rd;
                rt <= D_rt;
+               rs <= D_rs;
              end if;
          end if;
 end process;
@@ -744,29 +748,34 @@ entity Forwarding is
    rd_mem, rd_er : in std_logic_vector(4 downto 0);
    rs, rt : in std_logic_vector(4 downto 0);
    uins_EX, uins_Mem, uins_ER : in microinstruction;
-   ForwardA, ForwardB : out std_logic
+   ForwardA, ForwardB : out std_logic_vector( 1 downto 0 )
   );
 end entity;
 
 architecture arch of Forwarding is
 
-   signal opA, opB : std_logic_vector (1 downto 0);
-
 begin
-   ForwardA <= '1' when opA = "01" or opA = "10" or opA = "00" else '0';
-   ForwardB <= '1' when opB = "01" or opB = "10" or opB = "00" else '0';
 
   process(clock,reset)
   begin
      if reset = '1' then
-        opA <= "00";
-        opB <= "00";
+        ForwardA <= "00";
+        ForwardB <= "00";
      elsif clock'event and clock = '1' then
         if uins_EX.wreg = '1' and rd_mem /= "00000" then
            if rd_mem = rs then
-              opA <= "10";
-           elsif rd_mem = rt then
-              opA <= "01";
+              ForwardA <= "10";
+           end if;
+           if rd_mem = rt then
+              ForwardB <= "10";
+           end if;
+        end if;
+        if uins_Mem.wreg = '1' and rd_er /= "00000" then
+           if rd_er = rs and rd_mem /= rs then
+              ForwardA <= "01";
+           end if;
+           if rd_er = rt and rd_mem /= rt then
+              ForwardB <= "01";
            end if;
         end if;
      end if;
@@ -817,9 +826,10 @@ architecture datapath of datapath is
    signal npc_EX, RA, RB, ext16_EX, shift2_EX, aD_jump_EX, ext_zero_EX,
           IMED, RA_inst, op1, op2, RALU, outalu : std_logic_vector (31 downto 0);
    signal uins_EX : microinstruction;
-   signal adRD, adRD_EX, adRT_EX : std_logic_vector (4 downto 0);
+   signal adRD, adRD_EX, adRT_EX, adRS_EX : std_logic_vector (4 downto 0);
    signal Hi_Lo_en, end_mult_en, end_div_en, jump, salta : std_logic;
    signal D_Lo, D_Hi, Hi, Lo, mult_Hi, mult_Lo, resto, quociente  : std_logic_vector (31 downto 0);
+   signal fwdA, fwdB : std_logic_vector ( 1 downto 0 );
    --==============================================================================
 
    --==============================================================================
@@ -901,10 +911,10 @@ begin
               port map( ck => ck, rst => rst, in_uins => uins_DI, D_incpc => npc_DI,
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
                         D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,
-                        D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA,
+                        D_rd => adRD_DI, D_rs => adRS_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA,
                         RB => RB, Q_ext16 => ext16_EX, Q_shift2 => shift2_EX,
                         Q_aD_jump => aD_jump_EX, Q_ext_zero => ext_zero_EX, rd => adRD_EX,
-                        rt => adRT_EX);
+                        rt => adRT_EX, rs => adRS_EX);
 
    --==============================================================================
    --==============================================================================
@@ -932,13 +942,17 @@ begin
    RA_inst <= RB when uins_EX.i=SSLL or uins_EX.i=SSRA or uins_EX.i=SSRL else
               RA;
 
-   op1 <= npc_EX  when uins_EX.inst_branch = '1' else
+   op1 <= RALU_MEM when fwdA = "10" else
+          RIN when fwdA = "01" else
+          npc_EX  when uins_EX.inst_branch = '1' else
           RA_inst;
    --==============================================================================
 
    --==============================================================================
    -- mux para gerar o segundo operando da ULA
-   op2 <= RB when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR
+   op2 <= RALU_MEM when fwdB = "10" else
+          RIN when fwdB = "01" else
+          RB when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR
                                             or uins_EX.i=SLLV or uins_EX.i=SRAV or uins_EX.i=SRLV else
           IMED;
    --==============================================================================
@@ -1004,7 +1018,17 @@ begin
          port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => RALU,
                    D_EscMem => RB, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM,
                    RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);
+                   
    --==============================================================================
+   
+   -- Forwarding  unit
+   forwarding_unit: entity work.Forwarding
+             port map ( clock => ck, reset => rst, rd_mem => adRD_MEM, rd_er => adRD_ER,
+                        rs => adRS_EX, rt => adRT_EX, uins_EX => uins_EX, 
+                        uins_Mem => uins_Mem, uins_ER => uins_ER, ForwardA => fwdA, 
+                        ForwardB => fwdB );
+   --==============================================================================
+
    --==============================================================================
    -- fourth stage = MEM
    --==============================================================================
