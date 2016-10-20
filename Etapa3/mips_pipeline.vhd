@@ -1006,7 +1006,7 @@ begin
    --==============================================================================
 
    forward : entity work.Forwarding
-     port map( rd_mem => adRD_MEM, rd_er => adRD_ER, rs => adRS_EX, rt => adRT_DI,
+     port map( rd_mem => adRD_MEM, rd_er => adRD_ER, rs => adRS_EX, rt => adRT_EX,
                uins_Mem => uins_MEM, uins_ER => uins_ER, ForwardA => ForwardA,
                ForwardB => ForwardB);
 
