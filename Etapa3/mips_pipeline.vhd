@@ -703,8 +703,12 @@ entity hazard_detection is
    di_ex          : in microinstruction;
    rd             : in std_logic_vector(4 downto 0);
    rs,rt          : in std_logic_vector(4 downto 0);
+   salta	  : in std_logic;
    bolha          : out std_logic;
-   wpc, wbidi     : out std_logic
+   wpc, wbidi     : out std_logic;
+   rstBI_DI	  : out std_logic;
+   rstDI_EX	  : out std_logic
+   --rstEX_MEM	  : out std_logic	
   );
 end entity;
 
@@ -718,6 +722,10 @@ begin
    bolha <= '1' when stop = '1' else '0';
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
+
+   rstBI_DI <= '1' when salta = '1' else '0';
+   rstDI_EX <= '1' when salta = '1' else '0';
+   --rstEX_MEM <= '1' when salta = '1' else '0';
 
 end architecture;
 
@@ -779,13 +787,13 @@ end datapath;
 architecture datapath of datapath is
    --==============================================================================
    -- signal usado no BI
-   signal wpc, wbidi : std_logic;
+   signal wpc, wbidi, rstBI_DI : std_logic;
    signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0');
    --==============================================================================
 
    --==============================================================================
    -- signal usados no DI
-   signal bolha : std_logic;
+   signal bolha, rstBI_DI : std_logic;
    signal uins_DI : microinstruction;
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
    signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
