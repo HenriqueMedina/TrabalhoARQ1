@@ -459,7 +459,7 @@ use IEEE.Std_Logic_1164.all;
 use work.p_MRstd.all;
 
 entity BI_DI is
-      port(  ck, rst :              in std_logic;
+      port(  ck, rst, flush :              in std_logic;
              D_incpc :              in std_logic_vector(31 downto 0);
              en :                   in std_logic;
              D_instruction :        in std_logic_vector(31 downto 0);
@@ -480,9 +480,9 @@ begin
    RNPC: entity work.regnbit
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
 
-   process(ck, rst)
+   process(ck, rst, flush)
    begin
-      if rst = '1' then
+      if rst = '1' or flush = '1' then
          ir <= (others => '0');
          rs <= (others => '0');
          rd <= (others => '0');
@@ -509,7 +509,7 @@ use IEEE.Std_Logic_1164.all;
 use work.p_MRstd.all;
 
 entity DI_EX is
-      port( ck, rst :               in std_logic;
+      port( ck, rst, flush :               in std_logic;
             in_uins :               in microinstruction;
             D_incpc :               in std_logic_vector(31 downto 0);
             D_R1 :                  in std_logic_vector(31 downto 0);
@@ -567,7 +567,7 @@ begin
 
 	process(ck, rst)
     begin
-         if rst = '1' then
+         if rst = '1' or flush = '1' then
             rd <= (others => '0');
             rt <= (others => '0');
             rs <= (others => '0');
@@ -704,32 +704,51 @@ entity hazard_detection is
    di_ex          : in microinstruction;
    rd             : in std_logic_vector(4 downto 0);
    rs,rt          : in std_logic_vector(4 downto 0);
+   jump           : in std_logic;
    bolha          : out std_logic;
-   wpc, wbidi     : out std_logic
+   wpc, wbidi     : out std_logic;
+   flushBI_DI, flushDI_EX : out std_logic
   );
 end entity;
 
 architecture arch of hazard_detection is
 
-   signal stop : std_logic;
+   signal stopped, pulou : std_logic;
 
 begin
-   wpc   <= '0' when stop = '1' else '1';
-   wbidi <= '0' when stop = '1' else '1';
-   bolha <= '1' when stop = '1' else '0';
+   wpc   <= '0' when stopped = '1' else '1';
+   wbidi <= '0' when stopped = '1' else '1';
+   bolha <= '1' when stopped = '1' else '0';
+   flushBI_DI <= '1' when pulou = '1' else '0';
+   flushDI_EX <= '1' when pulou = '1' else '0';
+   
 
-   process (clock,reset)
+   process (clock,reset, di_ex, rd, rs, rt)
    begin
      if reset = '1' then
-        stop <= '0';
+        stopped <= '0';
      elsif clock'event and clock = '0' then -- pode não funcionar
         if (di_ex.ce = '1' and di_ex.rw = '0') and (rd = rs or rd = rt) then
-           stop <= '1';
+           stopped <= '1';
         else
-           stop <= '0';
+           stopped <= '0';
         end if;
      end if;
    end process;
+   
+   process (clock, reset, jump)
+   begin
+      if reset = '1' then
+            pulou <= '0';
+      elsif clock'event and clock = '0' then
+         if (jump = '1') then
+            pulou <= '1';
+         else 
+            pulou <= '0';
+         end if;
+      end if;
+   end process; 
+   
 
 end architecture;
 
@@ -808,13 +827,13 @@ end datapath;
 architecture datapath of datapath is
    --==============================================================================
    -- signal usado no BI
-   signal wpc, wbidi : std_logic;
+   signal wpc, wbidi, flushBI_DI : std_logic;
    signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0');
    --==============================================================================
 
    --==============================================================================
    -- signal usados no DI
-   signal bolha : std_logic;
+   signal bolha, flushDI_EX : std_logic;
    signal uins_DI : microinstruction;
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
    signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
@@ -871,7 +890,7 @@ begin
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
             port map(ck => ck, rst => rst, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
-                     ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
+                     ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext, flush => flushBI_DI);
 
    --==============================================================================
    --==============================================================================
@@ -885,7 +904,8 @@ begin
    -- Hazard detection unit
    harzard_unit: entity work.hazard_detection
                port map ( clock=>ck, reset=>rst, di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
-               bolha => bolha ,wpc => wpc, wbidi => wbidi);
+               bolha => bolha ,wpc => wpc, wbidi => wbidi, flushBI_DI => flushBI_DI, flushDI_EX => flushDI_EX, 
+               jump => jump);
 
 
    REGS: entity work.reg_bank(reg_bank)
@@ -914,7 +934,7 @@ begin
                         D_rd => adRD_DI, D_rs => adRS_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA,
                         RB => RB, Q_ext16 => ext16_EX, Q_shift2 => shift2_EX,
                         Q_aD_jump => aD_jump_EX, Q_ext_zero => ext_zero_EX, rd => adRD_EX,
-                        rt => adRT_EX, rs => adRS_EX);
+                        rt => adRT_EX, rs => adRS_EX, flush => flushDI_EX);
 
    --==============================================================================
    --==============================================================================
