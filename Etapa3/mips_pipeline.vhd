@@ -459,7 +459,7 @@ use IEEE.Std_Logic_1164.all;
 use work.p_MRstd.all;
 
 entity BI_DI is
-      port(  ck, rst :              in std_logic;
+      port(  ck, rst, rst_jump :    in std_logic;
              D_incpc :              in std_logic_vector(31 downto 0);
              en :                   in std_logic;
              D_instruction :        in std_logic_vector(31 downto 0);
@@ -482,7 +482,7 @@ begin
 
    process(ck, rst)
    begin
-      if rst = '1' then
+      if( rst = '1'  or rst_jump = '1' )then
          ir <= (others => '0');
          rs <= (others => '0');
          rd <= (others => '0');
@@ -509,7 +509,7 @@ use IEEE.Std_Logic_1164.all;
 use work.p_MRstd.all;
 
 entity DI_EX is
-      port( ck, rst :               in std_logic;
+      port( ck, rst, rst_jump :     in std_logic;
             in_uins :               in microinstruction;
             D_incpc :               in std_logic_vector(31 downto 0);
             D_R1 :                  in std_logic_vector(31 downto 0);
@@ -567,7 +567,7 @@ begin
 
 	process(ck, rst)
     begin
-         if rst = '1' then
+         if( rst = '1' or rst_jump = '1') then
             rd <= (others => '0');
             rt <= (others => '0');
             rs <= (others => '0');
@@ -703,11 +703,11 @@ entity hazard_detection is
    di_ex          : in microinstruction;
    rd             : in std_logic_vector(4 downto 0);
    rs,rt          : in std_logic_vector(4 downto 0);
-   salta	  : in std_logic;
+   success_jump	: in std_logic;
    bolha          : out std_logic;
    wpc, wbidi     : out std_logic;
-   rstBI_DI	  : out std_logic;
-   rstDI_EX	  : out std_logic
+   rstBI_DI	      : out std_logic;
+   rstDI_EX	      : out std_logic
    --rstEX_MEM	  : out std_logic	
   );
 end entity;
@@ -723,8 +723,8 @@ begin
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
 
-   rstBI_DI <= '1' when salta = '1' else '0';
-   rstDI_EX <= '1' when salta = '1' else '0';
+   rstBI_DI <= '1' when success_jump = '1' else '0';
+   rstDI_EX <= '1' when success_jump = '1' else '0';
    --rstEX_MEM <= '1' when salta = '1' else '0';
 
 end architecture;
@@ -793,7 +793,7 @@ architecture datapath of datapath is
 
    --==============================================================================
    -- signal usados no DI
-   signal bolha, rstBI_DI : std_logic;
+   signal bolha, rstDI_EX : std_logic;
    signal uins_DI : microinstruction;
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
    signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
@@ -849,8 +849,9 @@ begin
 
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
-            port map(ck => ck, rst => rst, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
-                     ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
+            port map(ck => ck, rst => rst, rst_jump => rstBI_DI, en => wbidi, D_incpc => incpc, 
+                     D_instruction => instruction, npc => npc_DI, ir => ir, rs => adRS_DI,
+                     rt => adRT_DI, rd => adRD_DI, ext => ext);
 
    --==============================================================================
    --==============================================================================
@@ -864,7 +865,8 @@ begin
    -- Hazard detection unit
    harzard_unit: entity work.hazard_detection
                port map ( di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
-                          bolha => bolha ,wpc => wpc, wbidi => wbidi);
+                          bolha => bolha ,wpc => wpc, wbidi => wbidi, success_jump => jump, 
+                          rstBI_DI => rstBI_DI, rstDI_EX => rstDI_EX);
 
 
    REGS: entity work.reg_bank(reg_bank)
@@ -887,7 +889,7 @@ begin
 
    -- Barreira DI_EX
    Di_Ex : entity work.DI_EX
-              port map( ck => ck, rst => rst, in_uins => uins_DI, D_incpc => npc_DI,
+              port map( ck => ck, rst => rst, rst_jump => rstDI_EX, in_uins => uins_DI, D_incpc => npc_DI,
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
                         D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,
                         D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA,
