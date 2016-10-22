@@ -698,6 +698,7 @@ use work.p_MRstd.all;
 
 entity hazard_detection is
   port (
+   clock : in std_logic;
    di_ex          : in microinstruction;
    rd             : in std_logic_vector(4 downto 0);
    rs,rt          : in std_logic_vector(4 downto 0);
@@ -723,10 +724,18 @@ begin
    bolha <= '1' when stop = '1' else '0';
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
-   flush <= '1' when jump = '1' else '0';
-   
    stop_multdiv <= '1' when (di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0' else '0';
    
+   flushh : process(clock)
+   begin
+      if clock'event and clock = '1' then
+         if jump = '1' then
+            flush <= '1';
+         else
+            flush <= '0';
+         end if;
+      end if;
+   end process;
 
 end architecture;
 
@@ -867,7 +876,7 @@ begin
 
    -- Hazard detection unit
    harzard_unit: entity work.hazard_detection
-               port map ( di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
+               port map ( clock => ck, di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
                           bolha => bolha ,wpc => wpc, wbidi => wbidi, jump => jump, flush=>flush, 
                           end_multdiv => Hi_Lo_en, wdiex => wdiex);
 
