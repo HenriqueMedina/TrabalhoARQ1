@@ -521,6 +521,7 @@ entity DI_EX is
             D_rs :                  in std_logic_vector(4 downto 0);
             D_rd :                  in std_logic_vector(4 downto 0);
             D_rt :                  in std_logic_vector(4 downto 0);
+            en :                    in std_logic;
 
             uins_EX :               out microinstruction;
             npc :                   out std_logic_vector(31 downto 0);
@@ -538,10 +539,7 @@ end DI_EX;
 
 architecture arq_DI_EX of DI_EX is
 
-   signal en : std_logic := '1';
 begin
-   en <= '1';
-
 
    RNPC: entity work.regnbit
                port map(ck=>ck, rst=>rst, ce=>en, D=>D_incpc, Q=>npc);
@@ -703,29 +701,32 @@ entity hazard_detection is
    di_ex          : in microinstruction;
    rd             : in std_logic_vector(4 downto 0);
    rs,rt          : in std_logic_vector(4 downto 0);
-   salta	  : in std_logic;
+   jump	         : in std_logic;
+   end_multdiv    : in std_logic;
+   
    bolha          : out std_logic;
-   wpc, wbidi     : out std_logic;
-   rstBI_DI	  : out std_logic;
-   rstDI_EX	  : out std_logic
+   wpc, wbidi, wdiex : out std_logic;
+   flush	  : out std_logic
    --rstEX_MEM	  : out std_logic	
   );
 end entity;
 
 architecture arch of hazard_detection is
 
-   signal stop : std_logic;
+   signal stop, stop_multdiv : std_logic;
 
 begin
-   wpc   <= '0' when stop = '1' else '1';
-   wbidi <= '0' when stop = '1' else '1';
+   wpc   <= '0' when stop = '1' or stop_multdiv = '1' else '1';
+   wbidi <= '0' when stop = '1' or stop_multdiv = '1' else '1';
+   wdiex <= '0' when stop_multdiv = '1' else '1';
+   
    bolha <= '1' when stop = '1' else '0';
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
-
-   rstBI_DI <= '1' when salta = '1' else '0';
-   rstDI_EX <= '1' when salta = '1' else '0';
-   --rstEX_MEM <= '1' when salta = '1' else '0';
+   flush <= '1' when jump = '1' else '0';
+   
+   stop_multdiv <= '1' when (di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0' else '0';
+   
 
 end architecture;
 
@@ -785,23 +786,26 @@ entity datapath is
 end datapath;
 
 architecture datapath of datapath is
+   signal flush_barreira : std_logic;
    --==============================================================================
    -- signal usado no BI
-   signal wpc, wbidi, rstBI_DI : std_logic;
+   signal wpc, wbidi : std_logic;
    signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0');
    --==============================================================================
 
    --==============================================================================
    -- signal usados no DI
-   signal bolha, rstBI_DI : std_logic;
+   signal bolha : std_logic;
    signal uins_DI : microinstruction;
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
    signal adRS_DI, adRT_DI, adRD_DI : std_logic_vector (4 downto 0) := (others => '0');
    signal ext : std_logic_vector(15 downto 0) := (others => '0');
+   signal flush : std_logic;
    --==============================================================================
 
    --==============================================================================
    -- signal usados no EX
+   signal wdiex : std_logic;
    signal npc_EX, RA, RB, ext16_EX, shift2_EX, aD_jump_EX, ext_zero_EX,
           IMED, RA_inst, op1, op2, RALU, outalu, op1_mux, op2_mux : std_logic_vector (31 downto 0);
    signal uins_EX : microinstruction;
@@ -826,7 +830,7 @@ architecture datapath of datapath is
    --==============================================================================
 
 begin
-
+   flush_barreira <= flush or rst;
    --==============================================================================
    --==============================================================================
    -- first_stage = BI
@@ -849,7 +853,7 @@ begin
 
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
-            port map(ck => ck, rst => rst, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
+            port map(ck => ck, rst => flush_barreira, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
                      ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext);
 
    --==============================================================================
@@ -864,7 +868,8 @@ begin
    -- Hazard detection unit
    harzard_unit: entity work.hazard_detection
                port map ( di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
-                          bolha => bolha ,wpc => wpc, wbidi => wbidi);
+                          bolha => bolha ,wpc => wpc, wbidi => wbidi, jump => jump, flush=>flush, 
+                          end_multdiv => Hi_Lo_en, wdiex => wdiex);
 
 
    REGS: entity work.reg_bank(reg_bank)
@@ -887,7 +892,7 @@ begin
 
    -- Barreira DI_EX
    Di_Ex : entity work.DI_EX
-              port map( ck => ck, rst => rst, in_uins => uins_DI, D_incpc => npc_DI,
+              port map( ck => ck, rst => rst, en => wdiex, in_uins => uins_DI, D_incpc => npc_DI,
                         D_R1 => R1, D_R2 => R2, D_ext16 => ext16, D_shift2 => shift2,
                         D_aD_jump => aD_jump, D_ext_zero => ext_zero, D_rt => adRT_DI,
                         D_rd => adRD_DI, uins_EX => uins_EX, npc => npc_EX, RA => RA,
@@ -922,19 +927,19 @@ begin
               RA;
 
    op1 <= npc_EX  when uins_EX.inst_branch = '1' else
-          RA_inst;
+          op1_mux;
    --==============================================================================
 
    --==============================================================================
    -- mux adiantamento
    op1_mux <= RIN when ForwardA = "01" else
               RALU_MEM when ForwardA = "10" else
-              op1;
+              RA_inst;
    --==============================================================================
 
    --==============================================================================
    -- mux para gerar o segundo operando da ULA
-   op2 <= RB when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR
+   op2 <= op2_mux when uins_EX.inst_grupo1 = '1' or uins_EX.i=SLTU or uins_EX.i=SLT or uins_EX.i=JR
                                             or uins_EX.i=SLLV or uins_EX.i=SRAV or uins_EX.i=SRLV else
           IMED;
    --==============================================================================
@@ -943,12 +948,12 @@ begin
    -- mux adiantamento
    op2_mux <= RIN when ForwardB = "01" else
               RALU_MEM when ForwardB = "10" else
-              op2;
+              RB;
    --==============================================================================
 
    -- ALU instantiation
    inst_alu: entity work.alu
-                port map (op1=>op1_mux, op2=>op2_mux, outalu=>outalu, op_alu=>uins_EX.i);
+                port map (op1=>op1, op2=>op2, outalu=>outalu, op_alu=>uins_EX.i);
 
    --==============================================================================
    -- mux saida da outalu
@@ -960,8 +965,8 @@ begin
    --==============================================================================
    -- evaluation of conditions to take the branch instructions
    -- condicao de salto
-   salta <=  '1' when ((RA=RB  and uins_EX.i=BEQ)  or (RA>=0  and uins_EX.i=BGEZ) or
-                        (RA<=0  and uins_EX.i=BLEZ) or (RA/=RB and uins_EX.i=BNE)) else
+   salta <=  '1' when ((op1_mux=op2_mux  and uins_EX.i=BEQ)  or (op1_mux>=0  and uins_EX.i=BGEZ) or
+                        (op1_mux<=0  and uins_EX.i=BLEZ) or (op1_mux/=op2_mux and uins_EX.i=BNE)) else
              '0';
    jump <= '1' when (uins_EX.inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL
                                                             or uins_EX.i=JALR or uins_EX.i=JR else
@@ -971,14 +976,14 @@ begin
    --==============================================================================
    -- multiplicador
    inst_mult: entity work.multiplica
-                port map (ck=>ck, start=>uins_EX.ini_mult, op1=>RA, op2=>RB,
+                port map (ck=>ck, start=>uins_EX.ini_mult, op1=>op1_mux, op2=>op2_mux,
                           end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
    --==============================================================================
 
    --==============================================================================
    -- divisor
    inst_div: entity work.divide
-                port map (ck=>ck, start=>uins_EX.ini_div, op1=>RA, op2=>RB,
+                port map (ck=>ck, start=>uins_EX.ini_div, op1=>op1_mux, op2=>op2_mux,
                           end_div=>end_div_en, resto=>resto, divisao=>quociente);
    --==============================================================================
 
