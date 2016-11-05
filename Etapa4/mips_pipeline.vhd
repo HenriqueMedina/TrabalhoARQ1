@@ -698,17 +698,18 @@ use work.p_MRstd.all;
 
 entity hazard_detection is
   port (
-   clock : in std_logic;
-   di_ex          : in microinstruction;
-   rd             : in std_logic_vector(4 downto 0);
-   rs,rt          : in std_logic_vector(4 downto 0);
-   jump	         : in std_logic;
-   end_multdiv    : in std_logic;
-   
-   bolha          : out std_logic;
+   clock             : in std_logic;
+   di_ex             : in microinstruction;
+   rd                : in std_logic_vector(4 downto 0);
+   rs,rt             : in std_logic_vector(4 downto 0);
+   jump	            : in std_logic;
+   end_multdiv       : in std_logic;
+   prediction        : in std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
+
+   new_prediction    : out std_logic_vector(1 downto 0);
+   bolha             : out std_logic;
    wpc, wbidi, wdiex : out std_logic;
-   flush	  : out std_logic
-   --rstEX_MEM	  : out std_logic	
+   flush	            : out std_logic
   );
 end entity;
 
@@ -724,18 +725,52 @@ begin
    bolha <= '1' when stop = '1' else '0';
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
-   stop_multdiv <= '1' when (di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0' else '0';
    
-   flushh : process(clock)
+   stop_multdiv <= '1' when ((di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0') and  else '0';
+   
+   flush <= '1' when jump = '1' else '0'; 
+   
+   jump_dinamico : process(clock)
    begin
-      if clock'event and clock = '1' then
-         if jump = '1' then
-            flush <= '1';
-         else
-            flush <= '0';
-         end if;
-      end if;
+      case prediction is
+      
+         when "00" =>
+                  if jump = '1' then                  
+                     new_prediction <= "01";
+                  else
+                     new_prediction <= "00";
+                  end if;
+         when "01" =>
+                  if jump = '1' then                  
+                     new_prediction <= "11";
+                  else
+                     new_prediction <= "00";
+                  end if;
+         when "10" =>
+                  if jump = '0' then                  
+                     new_prediction <= "00";
+                  else
+                     new_prediction <= "11";
+                  end if;
+         when "11" =>
+                  if jump = '0' then                  
+                     new_prediction <= "10";
+                  else
+                     new_prediction <= "11";
+                  end if;
+      end case;
    end process;
+   
+   --flushh : process(clock)
+   --begin
+   --   if clock'event and clock = '1' then
+   --      if jump = '1' then
+   --         flush <= '1';
+   --      else
+   --         flush <= '0';
+   --      end if;
+   --   end if;
+   --end process;
 
 end architecture;
 
@@ -744,8 +779,6 @@ end architecture;
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
-use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
-use IEEE.Std_Logic_arith.all;
 use work.p_MRstd.all;
 
 entity Forwarding is
@@ -770,6 +803,36 @@ begin
                "00";
 
 end architecture;
+
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+-- memory cache
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+library IEEE;
+use IEEE.Std_Logic_1164.all;
+use IEEE.Std_Logic_arith.all;
+use work.p_MRstd.all;
+
+entity Jump_memory is
+  port (
+         pc          : in std_logic_vector(31 downto 0);
+         incpc       : in std_logic_vector(31 downto 0);
+         destiny_pc  : in std_logic_vector(31 downto 0);
+       --prediction        : in std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
+         
+         target_pc   : out std_logic_vector(31 downto 0)
+         
+         
+  );
+end entity;
+
+architecture arch of Jump_memory is
+-- prediction pode ser feito aqui e tirar do Hazard mas eu queria dividir memoria de controle 
+   type memory is array ... to ... of std_logic_vector(... downto ...) 
+   signal memory_cache : memory;
+begin
+
+end architecture;
+
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -799,7 +862,8 @@ architecture datapath of datapath is
    --==============================================================================
    -- signal usado no BI
    signal wpc, wbidi : std_logic;
-   signal incpc, pc, dtpc : std_logic_vector(31 downto 0) := (others=> '0');
+   signal prediction : std_logic_vector (1 downto 0);
+   signal incpc, pc, dtpc, target_pc : std_logic_vector(31 downto 0) := (others=> '0');
    --==============================================================================
 
    --==============================================================================
@@ -849,7 +913,10 @@ begin
 
    incpc <= pc + 4; -- incrementa o pc
 
-   dtpc <= outalu when jump = '1' else incpc;
+   dtpc <= outalu when jump = '1' and (prediction = "00" or prediction = "01") else -- VVVVVV
+           target_pc  when alguman coisa que nao sei ainda else
+           npc_EX when (prediction = "11" or prediction = "10") and jump = '0' else -- ta errado, mas só a ideia agora 
+           incpc;
 
    -- Code memory starting address: beware of the OFFSET!
    -- The one below (x"00400000") serves for code generated
@@ -977,7 +1044,7 @@ begin
    salta <=  '1' when ((op1_mux=op2_mux  and uins_EX.i=BEQ)  or (op1_mux>=0  and uins_EX.i=BGEZ) or
                         (op1_mux<=0  and uins_EX.i=BLEZ) or (op1_mux/=op2_mux and uins_EX.i=BNE)) else
              '0';
-   jump <= '1' when (uins_EX.inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL
+   jump <= '1' after 1 ns when (uins_EX.inst_branch='1' and salta='1') or uins_EX.i=J or uins_EX.i=JAL -- coloquei um atraso
                                                             or uins_EX.i=JALR or uins_EX.i=JR else
            '0';
    --==============================================================================
@@ -1019,8 +1086,9 @@ begin
 
    Ex_Mem : entity work.EX_MEM
          port map( ck => ck, rst => rst, in_uins => uins_EX, D_outAlu => RALU,
-                   D_EscMem => RB, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM,
+                   D_EscMem => op2_mux, D_npc => npc_EX, D_rd => adRD, uins_Mem => uins_MEM,
                    RALU => RALU_MEM, npc => npc_MEM, EscMem => EscMem, rd => adRD_MEM);
+                   
    --==============================================================================
    --==============================================================================
    -- fourth stage = MEM
