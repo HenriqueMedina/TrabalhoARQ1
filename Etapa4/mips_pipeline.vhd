@@ -694,6 +694,7 @@ end arq_Mem_ER;
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
+use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
 
 entity hazard_detection is
@@ -704,9 +705,9 @@ entity hazard_detection is
    rs,rt             : in std_logic_vector(4 downto 0);
    jump	            : in std_logic;
    end_multdiv       : in std_logic;
-   prediction        : in std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
+--   prediction        : in std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
 
-   new_prediction    : out std_logic_vector(1 downto 0);
+   --new_prediction    : out std_logic_vector(1 downto 0);
    bolha             : out std_logic;
    wpc, wbidi, wdiex : out std_logic;
    flush	            : out std_logic
@@ -716,6 +717,7 @@ end entity;
 architecture arch of hazard_detection is
 
    signal stop, stop_multdiv : std_logic;
+   signal prediction, new_prediction : std_logic_vector(1 downto 0);
 
 begin
    wpc   <= '0' when stop = '1' or stop_multdiv = '1' else '1';
@@ -726,7 +728,7 @@ begin
 
    stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
    
-   stop_multdiv <= '1' when ((di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0') and  else '0';
+   stop_multdiv <= '1' when ((di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0')  else '0';
    
    flush <= '1' when jump = '1' else '0'; 
    
@@ -758,6 +760,7 @@ begin
                   else
                      new_prediction <= "11";
                   end if;
+         when others =>
       end case;
    end process;
    
@@ -779,6 +782,7 @@ end architecture;
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 library IEEE;
 use IEEE.Std_Logic_1164.all;
+use IEEE.Std_Logic_signed.all; -- needed for comparison instructions SLTxx
 use work.p_MRstd.all;
 
 entity Forwarding is
@@ -814,23 +818,60 @@ use work.p_MRstd.all;
 
 entity Jump_memory is
   port (
-         pc          : in std_logic_vector(31 downto 0);
-         incpc       : in std_logic_vector(31 downto 0);
-         destiny_pc  : in std_logic_vector(31 downto 0);
-       --prediction        : in std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
+         reset : in std_logic;
+         clock : in std_logic;
+         pc          : in std_logic_vector(15 downto 0);
+         destiny_pc  : in std_logic_vector(15 downto 0);
+         incpc       : in std_logic_vector (15 downto 0);
+         en          : in std_logic;
+         new_prediction : in std_logic_vector(1 downto 0);
          
+         prediction  : out std_logic_vector(1 downto 0); -- pode virar um signal posivelmente, mas enfim
          target_pc   : out std_logic_vector(31 downto 0)
-         
          
   );
 end entity;
 
 architecture arch of Jump_memory is
 -- prediction pode ser feito aqui e tirar do Hazard mas eu queria dividir memoria de controle 
-   type memory is array ... to ... of std_logic_vector(... downto ...) 
+   type memory is array (0 to 7) of std_logic_vector(33 downto 0); 
    signal memory_cache : memory;
+   signal comp :std_logic_vector(7 downto 0);
+   signal tam : integer range 0 to 7 := 0;
+   signal low_target : std_logic_vector(15 downto 0);
 begin
 
+   target_pc <= x"0040" & low_target;
+   
+   comparador : for i in 0 to 7 generate
+      comp(i) <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
+   end generate;
+   
+   get_valor : for i in 0 to 7 generate
+      low_target <= memory_cache(i)(15 downto 0) when comp(i) = '1' else (others => 'Z');
+      
+      prediction <= memory_cache(i)(33 downto 32) when comp(i) = '1' else (others => 'Z');
+   end generate;
+   
+   process (clock)
+   begin
+      if reset = '1' then
+         tam <= 0;
+      elsif clock'event and clock = '0' then
+         if en = '1' then
+            memory_cache(tam)(31 downto 16) <= incpc;
+            memory_cache(tam)(33 downto 32) <= new_prediction;
+            memory_cache(tam)(15 downto 0)  <= destiny_pc;
+         end if;
+      elsif en = '1' then
+            if tam /= 7 then
+               tam <= tam + 1;
+            else 
+               tam <= 0;
+            end if;
+      end if;
+   end process;
+   
 end architecture;
 
 
@@ -914,8 +955,8 @@ begin
    incpc <= pc + 4; -- incrementa o pc
 
    dtpc <= outalu when jump = '1' and (prediction = "00" or prediction = "01") else -- VVVVVV
-           target_pc  when alguman coisa que nao sei ainda else
-           npc_EX when (prediction = "11" or prediction = "10") and jump = '0' else -- ta errado, mas só a ideia agora 
+      --     target_pc  when alguman coisa que nao sei ainda else
+      --     npc_EX when (prediction = "11" or prediction = "10") and jump = '0' else -- ta errado, mas só a ideia agora 
            incpc;
 
    -- Code memory starting address: beware of the OFFSET!
@@ -926,6 +967,10 @@ begin
          port map(ck=>ck, rst=>rst, ce=>wpc, D=>dtpc, Q=>pc); -- reg PC
 
    i_address <= pc;  -- connects PC output to the instruction memory address bus
+
+   historico: entity work.Jump_memory
+         port map(clock => ck, reset => rst, pc => pc(15 downto 0), destiny_pc => outalu(15 downto 0), prediction => prediction, target_pc => target_pc, incpc => npc_EX(15 downto 0),
+                  en => '1', new_prediction => (others => '0'));
 
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
