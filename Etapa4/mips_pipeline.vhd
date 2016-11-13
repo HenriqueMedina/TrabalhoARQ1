@@ -262,6 +262,8 @@ architecture arq_mult of multiplica is
    signal cont : integer;
 begin
 
+      Ativo <= '0' when PS = Inicio else '1';
+
    process (ck)
    begin
       if ck'EVENT and ck = '1' then
@@ -303,7 +305,6 @@ begin
                   reg_Lo <= op1;
                   valor <= op2;
                   cont <= 0;                 -- conta ate 32 quando chegar no 32 acaba o somador
-                  Ativo <= '1';
                end if;
                end_mult <= '0';
 
@@ -316,7 +317,6 @@ begin
             when Desloca =>
                if cont = 32 then              -- quando cont for igual a 32 a multiplicacao deve acabar
                   end_mult <= '1';
-                  Ativo <= '1';
                end if;
                reg_Hi <= '0' & reg_Hi (32 downto 1);            -- desloca para a direita uma casa
                reg_Lo <= reg_Hi(0) & reg_Lo (31 downto 1); 	    -- desloca para a direita uma casa e add o primeiro bit (0) do hi no 31 do low
@@ -386,6 +386,8 @@ architecture arq_div of divide is
       signal cont           : integer;
 begin
 
+   Ativo <= '0' when PS=inicio else '1';
+
    process(start, ck)
    begin
       if PS= inicio and start='1' then       -- inicia os signal quando o start for ativado
@@ -393,7 +395,6 @@ begin
          reg_Lo   <= op1;
          valor    <= op2;
          cont     <= 0;                  -- contador de 1 ate 31
-         Ativo   <= '1';
 
       elsif ck'event and ck='1' then
 
@@ -410,8 +411,6 @@ begin
             end if;
 
             cont <= cont + 1;
-         elsif PS=termina then
-            Ativo   <= '0';
          end if;
       end if;
    end process;
@@ -734,8 +733,7 @@ architecture arch of hazard_detection is
 
    signal stop, stop_multdiv : std_logic;
    signal novo_valor : std_logic_vector (1 downto 0);
-  -- signal prediction, new_prediction : std_logic_vector(1 downto 0);
-
+   
 begin
    wpc   <= '0' when stop = '1' or stop_multdiv = '1' else '1';
    wbidi <= '0' when stop = '1' or stop_multdiv = '1' else '1';
@@ -747,7 +745,7 @@ begin
    
    stop_multdiv <= '1' when ((di_ex.ini_mult = '1' or di_ex.ini_div = '1') and end_multdiv = '0')  else '0';
    
-   flush <= '1' when (jump = '1' and (novo_valor = "01" or novo_valor <= "00")) or (jump = '0' and (novo_valor = "10" or novo_valor <= "11"))
+   flush <= '1' when (jump = '1' and (prediction = "01" or prediction <= "00")) or (jump = '0' and (prediction = "10" or prediction <= "11"))
             else '0';
    
    jump_dinamico : process(clock)
@@ -833,7 +831,7 @@ entity Jump_memory is
          pc          : in std_logic_vector(15 downto 0);
          destiny_pc  : in std_logic_vector(15 downto 0);
          incpc       : in std_logic_vector (15 downto 0);
-         en          : in std_logic;
+         flush          : in std_logic;
          new_prediction : in std_logic_vector(1 downto 0);
          
          prediction  : out std_logic_vector(1 downto 0);
@@ -846,39 +844,51 @@ architecture arch of Jump_memory is
 
    type memory is array (0 to 7) of std_logic_vector(33 downto 0); 
    signal memory_cache : memory;
-   signal comp :std_logic_vector(7 downto 0);
-   signal tam : integer range 0 to 7 := 0;
+   signal comp_read, comp_write :std_logic_vector(7 downto 0);
+   signal indice : integer range 0 to 7 := 0;
    signal low_target : std_logic_vector(15 downto 0);
+   signal gravar, atualiza : std_logic;
 begin
 
    target_pc <= x"0040" & low_target;
    
-   comparador : for i in 0 to 7 generate
-      comp(i) <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
-   end generate;
+   gravar   <= '1' when comp_write = 0 and flush = '1' else '0';
+   atualiza <= '1' when comp_write /= 0 else '0';
    
-   get_valor : for i in 0 to 7 generate
-      low_target <= memory_cache(i)(15 downto 0) when comp(i) = '1' else (others => 'Z');
+   MUXs : for i in 0 to 7 generate
+      comp_read(i) <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
       
-      prediction <= memory_cache(i)(33 downto 32) when comp(i) = '1' else (others => 'Z');
+      comp_write(i) <= '1' when memory_cache(i)(31 downto 16) = incpc-4 else '0';
+      
+      low_target <= memory_cache(i)(15 downto 0) when comp_read(i) = '1' else (others => 'Z');
+      
+      prediction <= memory_cache(i)(33 downto 32) when comp_read(i) = '1' else "00";
+            
+      process(clock)
+      begin   
+         if clock'event and clock = '0' then
+            if (atualiza = '1' and comp_write(i) = '1') or (gravar = '1' and i = indice) then
+               memory_cache(i)(31 downto 16) <= incpc-4;
+               memory_cache(i)(33 downto 32) <= new_prediction;
+               memory_cache(i)(15 downto 0)  <= destiny_pc;
+            end if;
+         end if;
+      end process;
+      
    end generate;
    
-   process (clock, reset)
+   contador : process(clock, reset)
    begin
       if reset = '1' then
-         tam <= 0;
+         indice <= 0;
       elsif clock'event and clock = '0' then
-         if en = '1' then
-            memory_cache(tam)(31 downto 16) <= incpc-4;
-            memory_cache(tam)(33 downto 32) <= new_prediction;
-            memory_cache(tam)(15 downto 0)  <= destiny_pc;
-         end if;
-      elsif en = '1' then
-            if tam /= 7 then
-               tam <= tam + 1;
-            else 
-               tam <= 0;
+         if gravar = '1' then
+            if indice /= 7 then
+               indice <= indice + 1;
+            else
+               indice <= 0;
             end if;
+         end if;
       end if;
    end process;
    
@@ -936,7 +946,7 @@ architecture datapath of datapath is
    signal uins_EX : microinstruction;
    signal adRD, adRD_EX, adRT_EX, adRS_EX : std_logic_vector (4 downto 0);
    signal prediction_EX_harzard, prediction_EX : std_logic_vector (1 downto 0);
-   signal Hi_Lo_en, end_mult_en, end_div_en, jump, salta, salta_jump : std_logic;
+   signal Hi_Lo_en, end_mult_en, end_div_en, jump, salta, salta_jump, ativo_mult, ativo_div : std_logic;
    signal D_Lo, D_Hi, Hi, Lo, mult_Hi, mult_Lo, resto, quociente  : std_logic_vector (31 downto 0);
    --==============================================================================
 
@@ -966,9 +976,9 @@ begin
 
    incpc <= pc + 4; -- incrementa o pc
 
-   dtpc <= outalu when flush = '1' else -- VVVVVV
-           --target_pc  when  else
-      --     npc_EX when (prediction = "11" or prediction = "10") and jump = '0' else -- ta errado, mas só a ideia agora 
+   dtpc <= outalu    when (new_prediction = "00" or new_prediction = "01") and flush = '1' else -- VVVVVV
+           target_pc when prediction = "10" or prediction = "11" else
+           npc_EX    when (new_prediction = "11" or new_prediction = "10") and flush = '1' else -- ta errado, mas só a ideia agora 
            incpc;
 
    -- Code memory starting address: beware of the OFFSET!
@@ -983,7 +993,7 @@ begin
    historico: entity work.Jump_memory
          port map(clock => ck, reset => rst, pc => pc(15 downto 0), destiny_pc => outalu(15 downto 0), 
                   prediction => prediction, target_pc => target_pc, incpc => npc_EX(15 downto 0),
-                  en => flush, new_prediction => new_prediction);
+                  flush => flush, new_prediction => new_prediction);
 
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
@@ -1114,14 +1124,14 @@ begin
    -- multiplicador
    inst_mult: entity work.multiplica
                 port map (ck=>ck, start=>uins_EX.ini_mult, op1=>op1_mux, op2=>op2_mux,
-                          end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo);
+                          end_mult=>end_mult_en, P_Hi=>mult_Hi, A_Lo=>mult_Lo, Ativo=>ativo_mult);
    --==============================================================================
 
    --==============================================================================
    -- divisor
    inst_div: entity work.divide
                 port map (ck=>ck, start=>uins_EX.ini_div, op1=>op1_mux, op2=>op2_mux,
-                          end_div=>end_div_en, resto=>resto, divisao=>quociente);
+                          end_div=>end_div_en, resto=>resto, divisao=>quociente, Ativo=>ativo_div);
    --==============================================================================
 
    --==============================================================================
