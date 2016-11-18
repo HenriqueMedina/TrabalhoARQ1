@@ -722,7 +722,8 @@ use work.p_MRstd.all;
 entity hazard_detection is
   port (
    clock             : in std_logic;
-   di_ex             : in microinstruction;
+   uins_DI           : in microinstruction;
+   uins_EX           : in microinstruction;
    rd                : in std_logic_vector(4 downto 0);
    rs,rt             : in std_logic_vector(4 downto 0);
    jump	            : in std_logic;
@@ -744,26 +745,25 @@ architecture arch of hazard_detection is
    signal novo_valor : std_logic_vector (1 downto 0);
    
 begin
+   
    wpc   <= '0' when stop = '1' or stop_multdiv = '1' else '1';
    wbidi <= '0' when stop = '1' or stop_multdiv = '1' else '1';
    wdiex <= '0' when stop_multdiv = '1' else '1';
    
    bolha <= '1' when stop = '1' else '0';
-
-   stop <= '1' when (di_ex.i = LW or di_ex.i = LBU) and (rd = rs or rd = rt) else '0';
+   stop  <= '1' when (uins_EX.i = LW or uins_EX.i = LBU) and (rd = rs or rd = rt) else '0';   
+   stop_multdiv <= '1' when ((uins_DI.i = MFLO or uins_DI.i = MFHI) and 
+                             (ativo_mult = '1' or ativo_div = '1')) else '0';
    
-   --stop_multdiv <= '1' when ((di_ex.i = mflo or di_ex.ini_div = '1') and end_multdiv = '0')  else '0';
-   
-   new_prediction <= "11" when di_ex.i=J or di_ex.i=JAL or di_ex.i=JALR or di_ex.i=JR else novo_valor;
-   
+   new_prediction <= "11" when uins_EX.i=J or uins_EX.i=JAL or uins_EX.i=JALR or uins_EX.i=JR else novo_valor;
    flush <= '1' after 1 ns when (jump = '1' and (prediction = "01" or prediction <= "00")) or 
-                                (jump = '0' and (prediction = "10" or prediction <= "11"))
-            else '0';
+                                (jump = '0' and (prediction = "10" or prediction <= "11")) else 
+            '0';
    
    jump_dinamico : process(clock)
    begin
       case prediction is
-      
+
          when "00" =>
                   if jump = '1' then                  
                      novo_valor <= "01";
@@ -816,11 +816,11 @@ architecture arch of Forwarding is
 begin
 
    ForwardA <= "10" when uins_Mem.wreg = '1' and (rd_mem /= 0 and rd_mem = rs) else
-               "01" when uins_ER.wreg = '1' and  (rd_er /= 0 and (rd_mem /= rs and rd_er = rs)) else
+               "01" when uins_ER.wreg = '1'  and (rd_er /= 0 and (rd_mem /= rs and rd_er = rs)) else
                "00";
 
    ForwardB <= "10" when uins_Mem.wreg = '1' and (rd_mem /= 0 and  rd_mem = rt) else
-               "01" when uins_ER.wreg = '1' and  (rd_er /= 0 and (rd_mem /= rt and rd_er = rt)) else
+               "01" when uins_ER.wreg = '1'  and (rd_er /= 0 and (rd_mem /= rt and rd_er = rt)) else
                "00";
 
 end architecture;
@@ -866,17 +866,13 @@ begin
    prediction <= S_prediction when comp_read /= 0 else "00";
    gravar   <= '1' when comp_write = 0 and flush = '1' else '0';
    atualiza <= '1' when comp_write /= 0 else '0';
-   
    saltou <= '1' when (S_prediction = "11" or S_prediction ="10") else '0';
    
-   MUXs : for i in 0 to 7 generate
-      comp_read(i) <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
-      
+   logic_memory : for i in 0 to 7 generate
+      comp_read(i)  <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
       comp_write(i) <= '1' when memory_cache(i)(31 downto 16) = incpc-4 else '0';
-      
-      low_target <= memory_cache(i)(15 downto 0) when comp_read(i) = '1' else (others => 'Z');
-      
-      S_prediction <= memory_cache(i)(33 downto 32) when comp_read(i) = '1' else (others => 'Z');
+      low_target    <= memory_cache(i)(15 downto 0)  when comp_read(i) = '1' else (others => 'Z');
+      S_prediction  <= memory_cache(i)(33 downto 32) when comp_read(i) = '1' else (others => 'Z');
       
       process(clock)
       begin   
@@ -888,7 +884,6 @@ begin
             end if;
          end if;
       end process;
-      
    end generate;
    
    contador : process(clock, reset)
@@ -1038,10 +1033,10 @@ begin
 
    -- Hazard detection unit
    harzard_unit: entity work.hazard_detection
-               port map ( clock => ck, di_ex => uins_EX, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
+               port map ( clock => ck, uins_EX => uins_EX, uins_DI => uins, rd => adRT_EX, rs => adRS_DI ,rt => adRT_DI,
                           bolha => bolha ,wpc => wpc, wbidi => wbidi, jump => salta_jump, flush=>flush, 
                           end_multdiv => Hi_Lo_en, wdiex => wdiex, new_prediction=> new_prediction, 
-                          prediction => prediction_EX_harzard, ativo_mult=> ativo_mult, ativo_div => ativo_div);
+                          prediction => prediction_EX, ativo_mult=> ativo_mult, ativo_div => ativo_div);
 
 
    REGS: entity work.reg_bank(reg_bank)
@@ -1141,12 +1136,9 @@ begin
    salta <=  '1' after 1 ns when ((op1_mux=op2_mux  and uins_EX.i=BEQ)  or (op1_mux>=0  and uins_EX.i=BGEZ) or
                         (op1_mux<=0  and uins_EX.i=BLEZ) or (op1_mux/=op2_mux and uins_EX.i=BNE)) else
              '0';
-   salta_jump <= '1' when (uins_EX.inst_branch='1' and salta='1') or jump = '1' else '0';
-   
-   prediction_EX_harzard <= prediction_EX;
-   
-   jump <= '1' when uins_EX.i=J or uins_EX.i=JAL or uins_EX.i=JALR or uins_EX.i=JR else
-           '0';
+   salta_jump <= '1' when (uins_EX.inst_branch='1' and salta='1') or uins_EX.i=J or 
+                           uins_EX.i=JAL or uins_EX.i=JALR or uins_EX.i=JR else
+                 '0';
    --==============================================================================
 
    --==============================================================================
