@@ -1,0 +1,8 @@
+Text Segment
+0x00400000  0x24090005  addiu $9,$0,0x0005    4    main:	li $t1, 5
+0x00400004  0x11200002  beq $9,$0,0x0002      7    		beq	  $t1,$zero,nao_pula
+0x00400008  0x25290002  addiu $9,$9,0x0002    8    		addiu $t1, $t1,2
+0x0040000c  0x2529fffd  addiu $9,$9,0xfffd    9    		addiu $t1,$t1,-3
+0x00400010  0x1520fffc  bne $9,$0,0xfffc      11   		bne $t1,$zero,loop
+0x00400014  0x08100001  j 0x00400004          12   		j	loop
+0x00400018  0x08100006  j 0x00400018          14   fim: 		j	fim

@@ -470,7 +470,6 @@ entity BI_DI is
              en :                   in std_logic;
              D_instruction :        in std_logic_vector(31 downto 0);
              D_prediction :         in std_logic_vector(1 downto 0);
-             D_saltou :             in std_logic;
              
              npc :              	   out std_logic_vector(31 downto 0);
              ir :                   out std_logic_vector(31 downto 0);
@@ -478,8 +477,7 @@ entity BI_DI is
              rt :                   out std_logic_vector(4 downto 0);
              rd :                   out std_logic_vector(4 downto 0);
              ext :                  out std_logic_vector(15 downto 0);
-             Q_prediction :         out std_logic_vector(1 downto 0);
-             Q_saltou :             out std_logic
+             Q_prediction :         out std_logic_vector(1 downto 0)
           );
 end BI_DI;
 
@@ -499,10 +497,8 @@ begin
          rt <= (others => '0');
          ext <= (others => '0');
          Q_prediction <= (others => '0');
-         Q_saltou <= '0';
       elsif ck'event and ck = '0' then
          if en = '1' then
-            Q_saltou <= D_saltou;
             Q_prediction <=  D_prediction;
             ir <= D_instruction;
             rs <= D_instruction(25 downto 21);
@@ -537,8 +533,7 @@ entity DI_EX is
             D_rt :                  in std_logic_vector(4 downto 0);
             en :                    in std_logic;
             D_prediction :         in std_logic_vector(1 downto 0);
-            D_saltou :              in std_logic;
-
+            
             uins_EX :               out microinstruction;
             npc :                   out std_logic_vector(31 downto 0);
             RA :                    out std_logic_vector(31 downto 0);
@@ -550,8 +545,7 @@ entity DI_EX is
             rs :                    out std_logic_vector(4 downto 0);
             rd :                    out std_logic_vector(4 downto 0);
             rt :                    out std_logic_vector(4 downto 0);
-            Q_prediction :          out std_logic_vector(1 downto 0);
-            Q_saltou :              out std_logic
+            Q_prediction :          out std_logic_vector(1 downto 0)
           );
 end DI_EX;
 
@@ -589,10 +583,8 @@ begin
             rs <= (others => '0');
             Q_prediction <= (others => '0');
             uins_EX <= C_incio;
-            Q_saltou <= '0';
          elsif ck'event and ck = '0' then
              if en = '1' then
-               Q_saltou <= D_saltou;
                Q_prediction <= D_prediction;
                uins_EX <= in_uins;
                rd <= D_rd;
@@ -756,8 +748,8 @@ begin
                              (ativo_mult = '1' or ativo_div = '1')) else '0';
    
    new_prediction <= "11" when uins_EX.i=J or uins_EX.i=JAL or uins_EX.i=JALR or uins_EX.i=JR else novo_valor;
-   flush <= '1' after 1 ns when (jump = '1' and (prediction = "01" or prediction <= "00")) or 
-                                (jump = '0' and (prediction = "10" or prediction <= "11")) else 
+   flush <= '1' after 1 ns when (jump = '1' and (prediction = "01" or prediction = "00")) or 
+                                (jump = '0' and (prediction = "10" or prediction = "11")) else 
             '0';
    
    jump_dinamico : process(clock)
@@ -844,7 +836,6 @@ entity Jump_memory is
          flush          : in std_logic;
          new_prediction : in std_logic_vector(1 downto 0);
          
-         saltou         : out std_logic;
          prediction     : out std_logic_vector(1 downto 0);
          target_pc      : out std_logic_vector(31 downto 0)
          
@@ -866,7 +857,6 @@ begin
    prediction <= S_prediction when comp_read /= 0 else "00";
    gravar   <= '1' when comp_write = 0 and flush = '1' else '0';
    atualiza <= '1' when comp_write /= 0 else '0';
-   saltou <= '1' when (S_prediction = "11" or S_prediction ="10") else '0';
    
    logic_memory : for i in 0 to 7 generate
       comp_read(i)  <= '1' when memory_cache(i)(31 downto 16) = pc else '0';
@@ -931,14 +921,14 @@ architecture datapath of datapath is
    signal flush_barreira : std_logic;
    --==============================================================================
    -- signal usado no BI
-   signal wpc, wbidi, saltou : std_logic;
+   signal wpc, wbidi : std_logic;
    signal prediction, new_prediction : std_logic_vector (1 downto 0);
    signal incpc, pc, dtpc, target_pc : std_logic_vector(31 downto 0) := (others=> '0');
    --==============================================================================
 
    --==============================================================================
    -- signal usados no DI
-   signal bolha, saltou_di : std_logic;
+   signal bolha : std_logic;
    signal uins_DI : microinstruction;
    signal prediction_DI : std_logic_vector (1 downto 0);   
    signal npc_DI, ir, ext16, shift2, aD_jump, ext_zero, R1, R2 : std_logic_vector(31 downto 0) := (others => '0');
@@ -949,7 +939,7 @@ architecture datapath of datapath is
 
    --==============================================================================
    -- signal usados no EX
-   signal wdiex, saltou_ex : std_logic;
+   signal wdiex : std_logic;
    signal npc_EX, RA, RB, ext16_EX, shift2_EX, aD_jump_EX, ext_zero_EX,
           IMED, RA_inst, op1, op2, RALU, outalu, op1_mux, op2_mux : std_logic_vector (31 downto 0);
    signal uins_EX : microinstruction;
@@ -986,7 +976,7 @@ begin
       if rst = '1' then
          flush_barreira <= '1';
       elsif ck'event and ck = '1' then
-         if flush = '1' and saltou_ex = '0' then
+         if flush = '1' then
             flush_barreira <= '1'; 
          end if;
       else 
@@ -998,7 +988,7 @@ begin
    incpc <= pc + 4; -- incrementa o pc
 
    dtpc <= outalu    when (prediction_EX = "00" or prediction_EX = "01") and flush = '1' else -- VVVVVV
-           npc_EX    when (prediction_EX = "11" or prediction_EX = "10") and (flush = '1' and saltou_ex = '0') else -- ta errado, mas só a ideia agora 
+           npc_EX    when (prediction_EX = "11" or prediction_EX = "10") and flush = '1' else -- ta errado, mas só a ideia agora 
            target_pc when prediction = "10" or prediction = "11" else
            incpc;
 
@@ -1014,13 +1004,13 @@ begin
    historico: entity work.Jump_memory
          port map(clock => ck, reset => rst, pc => pc(15 downto 0), destiny_pc => outalu(15 downto 0), 
                   prediction => prediction, target_pc => target_pc, incpc => npc_EX(15 downto 0),
-                  flush => flush, new_prediction => new_prediction, saltou => saltou);
+                  flush => flush, new_prediction => new_prediction);
 
    -- barreira BI/DI
    Bi_Di : entity work.BI_DI
             port map(ck => ck, rst => flush_barreira, en => wbidi, D_incpc => incpc, D_instruction => instruction, npc => npc_DI,
                      ir => ir, rs => adRS_DI, rt => adRT_DI, rd => adRD_DI, ext => ext, D_prediction => prediction, 
-                     Q_prediction => prediction_DI, D_saltou=> saltou, q_saltou => saltou_di);
+                     Q_prediction => prediction_DI);
 
    --==============================================================================
    --==============================================================================
@@ -1066,7 +1056,7 @@ begin
                         RB => RB, Q_ext16 => ext16_EX, Q_shift2 => shift2_EX,
                         Q_aD_jump => aD_jump_EX, Q_ext_zero => ext_zero_EX, rd => adRD_EX,
                         rt => adRT_EX, D_rs => adRS_DI, rs => adRS_EX, D_prediction => prediction_DI, 
-                        Q_prediction => prediction_EX, D_saltou => saltou_di, Q_saltou => saltou_ex);
+                        Q_prediction => prediction_EX);
 
    --==============================================================================
    --==============================================================================
